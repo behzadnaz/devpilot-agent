@@ -2,8 +2,7 @@ import ollama
 
 from agent.tools import TOOLS
 
-MODEL = "qwen3-4b-local"
-MAX_STEPS = 6
+from agent.config import MODEL, MAX_STEPS
 
 SYSTEM = (
     "You are a software engineering assistant working on a project. "
