@@ -1,32 +1,43 @@
-from pathlib import Path
+import ollama
 
-SANDBOX = (Path(__file__).resolve().parent.parent / "sandbox").resolve()
+from agent.tools import TOOLS
 
+MODEL = "qwen3-4b-local"
+MAX_STEPS = 6
 
-def _safe_path(relative_path: str) -> Path:
-    """Resolve a path and refuse anything outside the sandbox folder."""
-    path = (SANDBOX / relative_path).resolve()
-    if not path.is_relative_to(SANDBOX):
-        raise ValueError("Access denied: path is outside the sandbox")
-    return path
-
-
-def list_files() -> str:
-    """List all files inside the sandbox folder."""
-    files = [p.relative_to(SANDBOX).as_posix() for p in SANDBOX.rglob("*") if p.is_file()]
-    return "\n".join(files) if files else "The sandbox is empty."
+SYSTEM = (
+    "You are a software engineering assistant. You can only see files in the sandbox folder. "
+    "Use list_files and read_file to inspect code before answering. Do not guess file contents."
+)
 
 
-def read_file(path: str) -> str:
-    """Read a text file from the sandbox folder.
+def run_agent(goal: str) -> str:
+    print("Agent started...")
+    messages = [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": goal},
+    ]
 
-    Args:
-        path: File path relative to the sandbox folder, for example calculator.py
-    """
-    try:
-        return _safe_path(path).read_text(encoding="utf-8")
-    except Exception as e:
-        return f"Error: {e}"
+    for step in range(MAX_STEPS):
+        response = ollama.chat(model=MODEL, messages=messages, tools=list(TOOLS.values()))
+        messages.append(response.message)
+
+        if not response.message.tool_calls:
+            return response.message.content
+
+        for call in response.message.tool_calls:
+            name = call.function.name
+            args = call.function.arguments
+            print(f"[step {step + 1}] tool: {name} {args}")
+            func = TOOLS.get(name)
+            result = func(**args) if func else f"Unknown tool: {name}"
+            messages.append({"role": "tool", "tool_name": name, "content": str(result)})
+
+    return "Stopped: reached the step limit."
 
 
-TOOLS = {"list_files": list_files, "read_file": read_file}
+if __name__ == "__main__":
+
+
+
+    print(run_agent("Read hello.py. Quote its exact code, then explain in two sentences what it does."))
