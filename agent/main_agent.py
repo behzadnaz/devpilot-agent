@@ -1,8 +1,7 @@
 import ollama
 
-from agent.tools import TOOLS
-
 from agent.config import MODEL, MAX_STEPS
+from agent.tools import TOOLS
 
 SYSTEM = (
     "You are a software engineering assistant working on a project. "
