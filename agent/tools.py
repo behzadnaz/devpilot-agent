@@ -61,7 +61,7 @@ def write_file(path: str, content: str) -> str:
     """Create or replace a file in the project. A human must approve it before it is written.
 
     Args:
-        path: File path relative to the project root, for example docs/notes.md
+        path: File path relative to the project root, for example docs/README.md
         content: The complete new content of the file
     """
     try:
