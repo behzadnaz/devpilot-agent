@@ -1,0 +1,2 @@
+model: qwen3-4b-local
+endpoint: http://localhost:11434
