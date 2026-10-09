@@ -31,6 +31,24 @@ class _PreflightTest:
 
         assert result.status == "ok", "status"
 
+    def test_prompt_that_fits_the_context_window_passes(self, tmp_path):
+        settings = ModelSettings(model="m", endpoint="http://x", context_size=1000)
+        preflight = Preflight(settings, _OllamaClientStub(), tmp_path)
+
+        result = preflight.check_context_window(system_prompt="a" * 400, tool_list="b" * 400)
+
+        assert result.status == "ok", "status"
+
+    def test_prompt_that_does_not_fit_fails_and_says_what_to_change(self, tmp_path):
+        settings = ModelSettings(model="m", endpoint="http://x", context_size=1000)
+        preflight = Preflight(settings, _OllamaClientStub(), tmp_path)
+
+        result = preflight.check_context_window(system_prompt="a" * 4000, tool_list="b" * 4000)
+
+        assert result.status == "failed", "status"
+        assert "context_size" in result.message, "message names the setting"
+        assert "config/model.yaml" in result.message, "message says where to change it"
+
 
 class _PreflightResultTest:
     def test_value_object(self):
