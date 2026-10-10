@@ -3,11 +3,11 @@ import pytest
 from app.tools import ToolSet
 
 
-def _new_tools(tmp_path):
+def _new_tools(tmp_path, **options):
     project = tmp_path / "project"
     project.mkdir()
     (tmp_path / "secrets.txt").write_text("top secret")
-    return ToolSet(project)
+    return ToolSet(project, **options)
 
 
 class _ToolSetTest:
@@ -16,6 +16,7 @@ class _ToolSetTest:
 
         # Add every new tool that takes a path to this test, one line each.
         assert "outside the project" in tools.read_file("../secrets.txt"), "read_file"
+        assert "outside the project" in tools.list_files(".."), "list_files"
 
     def test_refused_call_reads_and_writes_nothing(self, tmp_path):
         tools = _new_tools(tmp_path)
@@ -48,3 +49,34 @@ class _ToolSetTest:
 
         assert "outside the project" in result, "refused"
         assert "top secret" not in result, "the secret is not returned"
+
+    def test_list_files_returns_the_entries(self, tmp_path):
+        tools = _new_tools(tmp_path)
+        project = tmp_path / "project"
+        (project / "docs").mkdir()
+        (project / "calculator.py").write_text("x")
+        (project / "README.md").write_text("y")
+
+        result = tools.list_files()
+
+        assert result == "docs/\ncalculator.py\nREADME.md", "folders first, then files, folders end with a slash"
+
+    def test_read_file_returns_the_content(self, tmp_path):
+        tools = _new_tools(tmp_path)
+        (tmp_path / "project" / "hello.py").write_text("print('hello')\n")
+
+        result = tools.read_file("hello.py")
+
+        assert result == "print('hello')\n", "content"
+
+    def test_file_longer_than_the_read_limit_is_returned_in_parts(self, tmp_path):
+        tools = _new_tools(tmp_path, read_limit=10)
+        (tmp_path / "project" / "big.txt").write_text("0123456789ABCDEFGHIJ")
+
+        first = tools.read_file("big.txt")
+        second = tools.read_file("big.txt", start=10)
+
+        assert first.startswith("0123456789"), "first part"
+        assert "more follows" in first, "the first part says that more follows"
+        assert "start=10" in first, "the first part says where the next part starts"
+        assert second == "ABCDEFGHIJ", "last part, with no note"
