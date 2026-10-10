@@ -1,12 +1,16 @@
+import subprocess
 from pathlib import Path
+
+from app.limits import Limits
 
 
 class ToolSet:
     """The tools the agent uses on one project folder."""
 
-    def __init__(self, project_folder, read_limit=20000):
+    def __init__(self, project_folder, read_limit=20000, limits=None):
         self._root = Path(project_folder).resolve()
         self._read_limit = read_limit
+        self._limits = limits or Limits()
 
     def _resolve(self, relative_path):
         if Path(relative_path).anchor:  # a drive or a leading slash: an absolute path
@@ -78,5 +82,23 @@ class ToolSet:
                 return f"Error: no such file: {path}"
             target.unlink()
             return f"File {path} was deleted."
+        except Exception as error:
+            return f"Error: {error}"
+
+    def run_command(self, command):
+        if not self._limits.allows(command):
+            allowed = ", ".join(self._limits.allowed_commands) or "none"
+            return f"Error: the command is not on the allowlist: {command}. Allowed commands: {allowed}"
+        try:
+            done = subprocess.run(
+                command.split(),
+                cwd=self._root,
+                capture_output=True,
+                text=True,
+                timeout=self._limits.timeout,
+            )
+            return f"exit code: {done.returncode}\n{done.stdout}{done.stderr}"
+        except subprocess.TimeoutExpired:
+            return f"Error: the command ran longer than the limit of {self._limits.timeout} seconds and was stopped"
         except Exception as error:
             return f"Error: {error}"

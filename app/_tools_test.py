@@ -1,5 +1,6 @@
 import pytest
 
+from app.limits import Limits
 from app.tools import ToolSet
 
 
@@ -150,3 +151,43 @@ class _ToolSetTest:
         assert not (project / "old.py").exists(), "the file is gone"
         assert "no such file" in missing, "a missing file"
         assert (project / "docs").is_dir(), "a folder is not deleted"
+
+    def test_allowed_command_returns_output_and_exit_code(self, tmp_path):
+        limits = Limits(allowed_commands=("python --version", "python no_such_file.py"), timeout=30)
+        tools = _new_tools(tmp_path, limits=limits)
+
+        worked = tools.run_command("python --version")
+        failed = tools.run_command("python no_such_file.py")
+
+        assert "exit code: 0" in worked, "exit code of a command that works"
+        assert "Python" in worked, "output of a command that works"
+        assert "exit code: 2" in failed, "exit code of a command that fails"
+
+    def test_command_runs_inside_the_project_folder(self, tmp_path):
+        limits = Limits(allowed_commands=("python where.py",), timeout=30)
+        tools = _new_tools(tmp_path, limits=limits)
+        (tmp_path / "project" / "where.py").write_text("import os\nprint(os.getcwd())\n")
+
+        result = tools.run_command("python where.py")
+
+        assert str((tmp_path / "project").resolve()) in result, "the working folder is the project"
+
+    def test_command_not_on_the_allowlist_is_refused_with_a_reason(self, tmp_path):
+        limits = Limits(allowed_commands=("python --version",), timeout=30)
+        tools = _new_tools(tmp_path, limits=limits)
+
+        result = tools.run_command("python --help")
+
+        assert "not on the allowlist" in result, "the reason"
+        assert "python --version" in result, "the allowed commands are listed"
+        assert "usage" not in result.lower(), "the command was not run"
+
+    def test_command_past_the_timeout_is_stopped_with_a_reason(self, tmp_path):
+        limits = Limits(allowed_commands=("python slow.py",), timeout=1)
+        tools = _new_tools(tmp_path, limits=limits)
+        (tmp_path / "project" / "slow.py").write_text("import time\ntime.sleep(3)\n")
+
+        result = tools.run_command("python slow.py")
+
+        assert "longer than" in result, "the reason"
+        assert "stopped" in result, "it was stopped"
