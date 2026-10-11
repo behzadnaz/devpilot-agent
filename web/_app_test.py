@@ -23,3 +23,12 @@ class _AppTest:
             "next": 2,
         }, "all events"
         assert rest == {"events": [{"type": "message", "text": "Done"}], "next": 2}, "only the new events"
+
+    def test_the_page_is_served(self):
+        client = TestClient(create_app(_AgentStub()))
+
+        page = client.get("/")
+
+        assert page.status_code == 200, "the page is found"
+        assert 'id="message"' in page.text, "the page has a box for the message"
+        assert 'id="steps"' in page.text, "the page has a list for the steps"

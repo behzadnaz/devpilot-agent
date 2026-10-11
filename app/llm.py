@@ -9,7 +9,7 @@ DEFAULT_SYSTEM = "You are a helpful assistant."
 
 
 class LLMClient:
-    """Sends one chat message to the model. The ollama client is passed in."""
+    """Sends chat messages to the model. The ollama client is passed in."""
 
     def __init__(self, settings, ollama_client):
         self._settings = settings
@@ -24,6 +24,14 @@ class LLMClient:
             ],
         )
         return response.message.content
+
+    def chat(self, messages, tools):
+        response = self._ollama_client.chat(
+            model=self._settings.model,
+            messages=messages,
+            tools=tools,
+        )
+        return response.message
 
 
 _default_client = None

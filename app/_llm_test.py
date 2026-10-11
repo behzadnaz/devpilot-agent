@@ -21,7 +21,6 @@ class _LLMClientTest:
             ],
         }, "model, default system message and the prompt are sent"
 
-
     def test_system_message_can_be_replaced(self):
         ollama_client = _OllamaClientStub(reply="ok")
         client = LLMClient(SETTINGS, ollama_client)
@@ -32,3 +31,16 @@ class _LLMClientTest:
             "role": "system",
             "content": "Answer in one word.",
         }, "system message"
+
+    def test_chat_sends_the_tools_and_returns_the_models_message(self):
+        ollama_client = _OllamaClientStub(reply="", tool_calls=[("read_file", {"path": "hello.py"})])
+        client = LLMClient(SETTINGS, ollama_client)
+        tools = [{"type": "function", "function": {"name": "read_file"}}]
+        messages = [{"role": "user", "content": "Read hello.py"}]
+
+        message = client.chat(messages, tools)
+
+        assert ollama_client.chat_called_with == {"model": "qwen3-4b-local", "messages": messages}, "model and messages"
+        assert ollama_client.tools_called_with == tools, "the tools are sent"
+        assert message.tool_calls[0].function.name == "read_file", "tool name"
+        assert message.tool_calls[0].function.arguments == {"path": "hello.py"}, "arguments"
