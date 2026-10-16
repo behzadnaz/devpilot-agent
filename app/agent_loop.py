@@ -36,3 +36,10 @@ class AgentLoop:
                 }
             )
             messages.append({"role": "tool", "tool_name": parsed.name, "content": result})
+
+        events.publish("status", "failed")
+        events.publish(
+            "message",
+            f"Stopped after {self._max_steps} steps without a final answer. "
+            "Review the steps and try a more specific task if needed.",
+        )

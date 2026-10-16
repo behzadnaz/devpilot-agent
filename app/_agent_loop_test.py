@@ -83,7 +83,14 @@ class _AgentLoopTest:
 
     def test_the_loop_makes_no_more_model_calls_than_the_step_limit(self, tmp_path):
         loop, llm = _new_loop(tmp_path, [tool_call("list_files") for _ in range(3)], max_steps=3)
+        events = EventStream()
 
-        loop.run("Never finish", EventStream())
+        loop.run("Never finish", events)
 
+        published = events.since(0)
         assert len(llm.calls) == 3, "exactly the step limit"
+        assert published[-2] == Event("status", "failed"), "the loop reports that the task did not finish"
+        assert published[-1] == Event(
+            "message",
+            "Stopped after 3 steps without a final answer. Review the steps and try a more specific task if needed.",
+        ), "the UI receives a clear reason for stopping"
