@@ -1,0 +1,157 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "list_files",
+      "description": "List the files and folders in one folder of the project. Folders end with a slash.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Folder, relative to the project. Use . for the project folder."
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read a text file. A long file comes back in parts, and the reply says where the next part starts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File, relative to the project."
+          },
+          "start": {
+            "type": "integer",
+            "description": "Where to start reading. Use the number from the previous reply."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_file",
+      "description": "Create a new file with the given content. Missing folders are created.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "New file, relative to the project."
+          },
+          "content": {
+            "type": "string",
+            "description": "The whole content of the file."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit_file",
+      "description": "Replace one exact piece of text in a file. The text must appear exactly once.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File, relative to the project."
+          },
+          "old_text": {
+            "type": "string",
+            "description": "The exact text to replace."
+          },
+          "new_text": {
+            "type": "string",
+            "description": "The text to put in its place."
+          }
+        },
+        "required": [
+          "path",
+          "old_text",
+          "new_text"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "move_file",
+      "description": "Move or rename a file. The destination must not exist.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "File to move, relative to the project."
+          },
+          "destination": {
+            "type": "string",
+            "description": "New path, relative to the project."
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_file",
+      "description": "Delete one file. Folders cannot be deleted.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File, relative to the project."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_command",
+      "description": "Run one command from the allowed list. The reply has the exit code and the output.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The whole command, exactly as in the allowed list."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    }
+  }
+]
