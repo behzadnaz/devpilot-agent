@@ -1,114 +1,345 @@
+
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DevPilot</title>
-<style>
-  :root { --bg:#f7f6f3; --card:#ffffff; --text:#1f1f1f; --muted:#6b6b6b; --line:#ddd9d0; --accent:#2f5bd3; --add:#e3f4e1; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#16181d; --card:#1f232b; --text:#eceff4; --muted:#a0a8b8; --line:#333a47; --accent:#7aa2ff; --add:#1f3a24; }
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; font:16px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
-  main { max-width:760px; margin:0 auto; padding:24px 16px 48px; }
-  h1 { font-size:20px; margin:0 0 16px; }
-  h2 { font-size:14px; margin:0 0 8px; color:var(--muted); font-weight:500; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
-  textarea { width:100%; min-height:72px; font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:8px; padding:10px; resize:vertical; }
-  button { font:inherit; padding:8px 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; margin-top:8px; }
-  button:disabled { opacity:.5; cursor:default; }
-  #status { margin:0 0 8px; font-size:14px; color:var(--muted); }
-  #steps { list-style:none; margin:0; padding:0; }
-  #steps li { padding:6px 0; border-top:1px solid var(--line); font:14px ui-monospace, Consolas, monospace; white-space:pre-wrap; }
-  #steps li:first-child { border-top:0; }
-  .tool_call { color:var(--accent); }
-  .tool_result { color:var(--muted); }
-  #diff { margin:0; padding:10px; background:var(--add); border-radius:8px; font:14px ui-monospace, Consolas, monospace; overflow-x:auto; white-space:pre-wrap; }
-  #reply { margin:0; white-space:pre-wrap; }
-</style>
-</head>
-<body>
-<main>
-  <h1>DevPilot</h1>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevPilot</title>
 
-  <section class="card">
-    <h2>Your task</h2>
-    <textarea id="message" placeholder="For example: Create a simple calculator"></textarea>
-    <button id="send">Send</button>
-  </section>
-
-  <section class="card">
-    <h2>Steps</h2>
-    <p id="status">Waiting for a task.</p>
-    <ol id="steps"></ol>
-  </section>
-
-  <section class="card" id="changes" hidden>
-    <h2>Changes</h2>
-    <pre id="diff"></pre>
-  </section>
-
-  <section class="card" id="replyCard" hidden>
-    <h2>Reply</h2>
-    <p id="reply"></p>
-  </section>
-</main>
-
-<script>
-  const message = document.getElementById("message");
-  const send = document.getElementById("send");
-  const statusLine = document.getElementById("status");
-  const steps = document.getElementById("steps");
-  const diff = document.getElementById("diff");
-  const changes = document.getElementById("changes");
-  const reply = document.getElementById("reply");
-  const replyCard = document.getElementById("replyCard");
-  let next = 0;
-
-  function show(event) {
-    if (event.type === "status") {
-      statusLine.textContent = event.text;
-    } else if (event.type === "diff") {
-      diff.textContent = event.text;
-      changes.hidden = false;
-    } else if (event.type === "message") {
-      reply.textContent = event.text;
-      replyCard.hidden = false;
-      send.disabled = false;
-    } else {
-      const item = document.createElement("li");
-      item.className = event.type;
-      item.textContent = (event.type === "tool_call" ? "> " : "< ") + event.text;
-      steps.appendChild(item);
+  <style>
+    :root {
+      --bg: #f7f6f3;
+      --card: #ffffff;
+      --text: #1f1f1f;
+      --muted: #6b6b6b;
+      --line: #ddd9d0;
+      --accent: #2f5bd3;
+      --add: #e3f4e1;
     }
-  }
 
-  async function poll() {
-    const response = await fetch("/events?after=" + next);
-    const data = await response.json();
-    data.events.forEach(show);
-    next = data.next;
-  }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181d;
+        --card: #1f232b;
+        --text: #eceff4;
+        --muted: #a0a8b8;
+        --line: #333a47;
+        --accent: #7aa2ff;
+        --add: #1f3a24;
+      }
+    }
 
-  async function start() {
-    const text = message.value.trim();
-    if (!text) return;
-    send.disabled = true;
-    steps.innerHTML = "";
-    changes.hidden = true;
-    replyCard.hidden = true;
-    statusLine.textContent = "Starting...";
-    await fetch("/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }),
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font: 16px/1.5 system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 16px;
+    }
+
+    h2 {
+      font-size: 14px;
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    textarea,
+    input {
+      width: 100%;
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    textarea {
+      min-height: 72px;
+      resize: vertical;
+    }
+
+    button {
+      font: inherit;
+      padding: 8px 18px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    #status,
+    #workspaceStatus {
+      margin: 8px 0;
+      font-size: 14px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    #steps {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    #steps li {
+      padding: 6px 0;
+      border-top: 1px solid var(--line);
+      font: 14px ui-monospace, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    #steps li:first-child {
+      border-top: 0;
+    }
+
+    .tool_call {
+      color: var(--accent);
+    }
+
+    .tool_result {
+      color: var(--muted);
+    }
+
+    #diff {
+      margin: 0;
+      padding: 10px;
+      background: var(--add);
+      border-radius: 8px;
+      font: 14px ui-monospace, Consolas, monospace;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    #reply {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>DevPilot</h1>
+
+    <section class="card" id="workspaceCard">
+      <h2>Workspace</h2>
+
+      <p id="workspaceDescription">
+        Choose the configured folder where DevPilot will create and manage projects.
+      </p>
+
+      <label for="workspacePath">Workspace folder path</label>
+
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input
+          id="workspacePath"
+          type="text"
+          placeholder="Select a workspace folder"
+          autocomplete="off"
+        >
+      <button id="browseWorkspace" type="button">Browse...</button>
+      </div>
+
+      <button id="createWorkspace" type="button">
+        Create Workspace
+      </button>
+
+      <p id="workspaceStatus" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card">
+      <h2>Your task</h2>
+      <textarea
+        id="message"
+        placeholder="For example: Create a simple calculator"
+      ></textarea>
+      <button id="send" type="button">Send</button>
+    </section>
+
+    <section class="card">
+      <h2>Steps</h2>
+      <p id="status">Waiting for a task.</p>
+      <ol id="steps"></ol>
+    </section>
+
+    <section class="card" id="changes" hidden>
+      <h2>Changes</h2>
+      <pre id="diff"></pre>
+    </section>
+
+    <section class="card" id="replyCard" hidden>
+      <h2>Reply</h2>
+      <p id="reply"></p>
+    </section>
+  </main>
+
+  <script>
+    const message = document.getElementById("message");
+    const send = document.getElementById("send");
+    const statusLine = document.getElementById("status");
+    const steps = document.getElementById("steps");
+    const diff = document.getElementById("diff");
+    const changes = document.getElementById("changes");
+    const reply = document.getElementById("reply");
+    const replyCard = document.getElementById("replyCard");
+
+    const workspacePath = document.getElementById("workspacePath");
+    const createWorkspace = document.getElementById("createWorkspace");
+    const workspaceStatus = document.getElementById("workspaceStatus");
+
+    let next = 0;
+
+    createWorkspace.addEventListener("click", async () => {
+      const path = workspacePath.value.trim();
+
+      if (!path) {
+        workspaceStatus.textContent = "Enter the workspace folder path.";
+        return;
+      }
+
+      createWorkspace.disabled = true;
+      workspaceStatus.textContent = "Creating workspace...";
+
+      try {
+        const response = await fetch("/workspace", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ path })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.detail || "Could not create workspace."
+          );
+        }
+
+        workspaceStatus.textContent =
+          "Workspace ready: " + data.path;
+      } catch (error) {
+        workspaceStatus.textContent =
+          error.message || "Workspace request failed.";
+      } finally {
+        createWorkspace.disabled = false;
+      }
     });
-  }
 
-  send.addEventListener("click", start);
-  fetch("/events?after=0").then(r => r.json()).then(d => { next = d.next; });
-  setInterval(poll, 1000);
-</script>
+    function show(event) {
+      if (event.type === "status") {
+        statusLine.textContent = event.text;
+      } else if (event.type === "diff") {
+        diff.textContent = event.text;
+        changes.hidden = false;
+      } else if (event.type === "message") {
+        reply.textContent = event.text;
+        replyCard.hidden = false;
+        send.disabled = false;
+      } else {
+        const item = document.createElement("li");
+        item.className = event.type;
+        item.textContent =
+          (event.type === "tool_call" ? "> " : "< ") +
+          event.text;
+        steps.appendChild(item);
+      }
+    }
+
+    async function poll() {
+      try {
+        const response = await fetch("/events?after=" + next);
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        data.events.forEach(show);
+        next = data.next;
+      } catch (error) {
+        console.error("Could not retrieve task events:", error);
+      }
+    }
+
+    async function start() {
+      const text = message.value.trim();
+
+      if (!text) {
+        return;
+      }
+
+      send.disabled = true;
+      steps.innerHTML = "";
+      changes.hidden = true;
+      replyCard.hidden = true;
+      statusLine.textContent = "Starting...";
+
+      try {
+        const response = await fetch("/tasks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ message: text })
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.detail || "Could not start task.");
+        }
+      } catch (error) {
+        statusLine.textContent = error.message;
+        send.disabled = false;
+      }
+    }
+
+    send.addEventListener("click", start);
+
+    fetch("/events?after=0")
+      .then(response => response.json())
+      .then(data => {
+        next = data.next;
+      })
+      .catch(error => {
+        console.error("Could not initialize events:", error);
+      });
+
+    setInterval(poll, 1000);
+  </script>
 </body>
 </html>

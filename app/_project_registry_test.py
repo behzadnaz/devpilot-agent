@@ -47,7 +47,7 @@ class _ProjectRegistryTest:
         except KeyError as error:
             assert "unknown-project" in str(error)
 
-    def test_registry_builds_agent_from_requested_project_config(self):
+    def test_registry_builds_agent_from_root_config(self):
         projects = {
             "alpha": {"root": "projects/alpha"},
             "beta": {"root": "projects/beta"},
@@ -100,7 +100,7 @@ class _ProjectRegistryTest:
         assert (development_path / "development.txt").read_text() == "Development project"
         assert not (planning_path / "development.txt").exists()
 
-    def test_registry_builds_agent_from_requested_project_config(self):
+    def test_registry_builds_agent_from_path_config(self):
         projects = {
             "planning": {"path": "projects/planning"},
             "development": {"path": "projects/development"},

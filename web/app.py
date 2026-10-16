@@ -1,15 +1,42 @@
+
+import os
 import threading
+import tkinter as tk
+
+from tkinter import filedialog
 from pathlib import Path
 
+import ollama
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.demo_agent import DemoAgent
+from app.agent_factory import AgentFactory
+from app.config import ModelSettings
 from app.events import EventStream
+from app.llm import LLMClient
+from app.project_registry import ProjectRegistry
+from app.tool_schemas import ToolSchemas
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PAGE = Path(__file__).parent / "static" / "index.html"
+MODEL_CONFIG = PROJECT_ROOT / "config" / "model.yaml"
+TOOLS_CONFIG = PROJECT_ROOT / "config" / "tools.json"
+
+PROJECTS_ROOT = Path(
+    os.environ.get(
+        "DEVPILOT_PROJECTS_ROOT",
+        str(Path.home() / "DevPilot-Workspace"),
+    )
+).resolve()
+
+SYSTEM_PROMPT = """
+You are a software development assistant working within the selected project.
+Use the available tools to inspect or modify project files when appropriate.
+Stay within the selected project directory.
+Explain your actions clearly and never claim a change succeeded unless it did.
+"""
 
 
 class TaskRequest(BaseModel):
@@ -23,17 +50,120 @@ class ProjectRequest(BaseModel):
     workflow: str
 
 
+class WorkspaceRequest(BaseModel):
+    path: str
+
+
 def _in_background(job):
     threading.Thread(target=job, daemon=True).start()
 
 
-def create_app(agent=None, start=_in_background, project_registry=None):
+def load_model_settings():
+    return ModelSettings.load(MODEL_CONFIG)
+
+
+def create_llm_client(settings):
+    return LLMClient(
+        settings=settings,
+        ollama_client=ollama.Client(host=settings.endpoint),
+    )
+
+
+def load_tool_schemas():
+    return ToolSchemas.load(TOOLS_CONFIG)
+
+
+def build_project_registry(projects):
+    settings = load_model_settings()
+    llm = create_llm_client(settings)
+    tool_schemas = load_tool_schemas()
+
+    factory = AgentFactory(
+        llm=llm,
+        tool_schemas=tool_schemas,
+        system_prompt=SYSTEM_PROMPT,
+    )
+
+    return ProjectRegistry(
+        projects=projects,
+        agent_factory=factory,
+    )
+
+def select_folder_dialog():
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+
+    try:
+        selected = filedialog.askdirectory(
+            title="Select project folder",
+            mustexist=True,
+        )
+        return selected or None
+    finally:
+        root.destroy()
+
+def create_app(
+    agent=None,
+    start=_in_background,
+    project_registry=None,
+    projects_root=None,
+):
     web_app = FastAPI()
     stream = EventStream()
+
+
+    @web_app.get("/select-folder")
+    def select_folder():
+        try:
+            path = select_folder_dialog()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not open the folder selection dialog.",
+            ) from exc
+
+        if not path:
+            raise HTTPException(
+                status_code=400,
+                detail="Folder selection was cancelled.",
+            )
+
+        return {"path": path}
 
     @web_app.get("/")
     def page():
         return FileResponse(PAGE)
+
+    @web_app.post("/workspace", status_code=201)
+    def create_workspace(request: WorkspaceRequest):
+        if projects_root is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Workspace root is not configured.",
+            )
+
+        root = Path(projects_root).resolve()
+        requested_path = Path(request.path).resolve()
+
+        if requested_path != root:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Workspace path must match the configured "
+                    "workspace root."
+                ),
+            )
+
+        try:
+            requested_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not create workspace.",
+            ) from exc
+
+        return {"path": str(requested_path)}
 
     @web_app.get("/projects")
     def list_projects():
@@ -70,6 +200,21 @@ def create_app(agent=None, start=_in_background, project_registry=None):
                 detail="Project ID, path, and workflow are required.",
             )
 
+        if projects_root is not None:
+            root = Path(projects_root).resolve()
+            requested_path = Path(path).resolve()
+
+            if not requested_path.is_relative_to(root):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Project path must be inside "
+                        "the approved workspace."
+                    ),
+                )
+
+            path = requested_path
+
         try:
             project_registry.add_project(
                 project_id,
@@ -102,7 +247,7 @@ def create_app(agent=None, start=_in_background, project_registry=None):
                 raise HTTPException(
                     status_code=404,
                     detail="Project not found.",
-                )
+                ) from None
 
         if selected_agent is None:
             raise HTTPException(
@@ -122,7 +267,10 @@ def create_app(agent=None, start=_in_background, project_registry=None):
 
         return {
             "events": [
-                {"type": event.type, "text": event.text}
+                {
+                    "type": event.type,
+                    "text": event.text,
+                }
                 for event in found
             ],
             "next": after + len(found),
@@ -131,4 +279,14 @@ def create_app(agent=None, start=_in_background, project_registry=None):
     return web_app
 
 
-application = create_app(DemoAgent())
+DEFAULT_PROJECTS = {
+    "default": {
+        "path": PROJECTS_ROOT,
+        "workflow": "software-development",
+    }
+}
+
+application = create_app(
+    project_registry=build_project_registry(DEFAULT_PROJECTS),
+    projects_root=PROJECTS_ROOT,
+)

@@ -4,7 +4,9 @@ from app.tools import ToolSet
 from app.agent_loop import AgentLoop
 from app.reply_parser import ReplyParser
 from app._llm_stub import _LLMStub, final_message
-
+from app.project_registry import ProjectRegistry
+from pathlib import Path
+import web.app as web_app_module
 from web.app import create_app
 
 class _ProjectRegistryStub:
@@ -258,4 +260,177 @@ class _AppTest:
         assert response.json()["detail"] == (
             "Project already exists: devpilot"
         )
+
+    def test_rejects_project_path_outside_workspace(self, tmp_path):
+        workspace = tmp_path / "projects"
+        workspace.mkdir()
+
+        outside_path = tmp_path / "private"
+        outside_path.mkdir()
+
+        class ProjectRegistryStub:
+            def __init__(self):
+                self.add_called = False
+
+            def add_project(self, project_id, config):
+                self.add_called = True
+
+        registry = ProjectRegistryStub()
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "my-project",
+                "path": str(outside_path),
+                "workflow": "development",
+            },
+        )
+
+        assert response.status_code == 400
+        assert registry.add_called is False
+
+    def test_app_can_start_with_project_registry(self, tmp_path):
+        registry = ProjectRegistry({
+            "demo": {
+                "path": Path("/tmp/devpilot-demo"),
+                "workflow": "software-development",
+            }
+        })
+
+        app = create_app(project_registry=registry)
+
+        assert app is not None
+
+    def test_app_startup_wires_real_agent_components(monkeypatch, tmp_path):
+        class FakeAgent:
+            def run(self, message, stream):
+                pass
+
+        class FakeFactory:
+            def __call__(self, project_id, config):
+                return FakeAgent()
+
+        registry = ProjectRegistry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            agent_factory=FakeFactory(),
+        )
+
+        app = create_app(project_registry=registry)
+
+        assert app is not None
+        assert registry.get_agent("demo").__class__ is FakeAgent
+
+    def test_create_application_wires_project_registry(monkeypatch, tmp_path):
+        class FakeAgent:
+            def run(self, message, stream):
+                pass
+
+        class FakeFactory:
+            def __call__(self, project_id, config):
+                return FakeAgent()
+
+        registry = ProjectRegistry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            agent_factory=FakeFactory(),
+        )
+
+        app = web_app_module.create_app(project_registry=registry)
+
+        assert app is not None
+        assert registry.get_agent("demo").__class__ is FakeAgent
+
+    def test_build_project_registry_connects_agent_factory(self, monkeypatch, tmp_path):
+        import web.app as web_app_module
+
+        class FakeLLM:
+            pass
+
+        class FakeToolSchemas:
+            tools = []
+
+            def required_arguments(self):
+                return {}
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: FakeLLM(),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "load_tool_schemas",
+            lambda: FakeToolSchemas(),
+            raising=False,
+        )
+
+        registry = web_app_module.build_project_registry(
+            {"demo": {"path": tmp_path, "workflow": "software-development"}}
+        )
+
+        assert registry.get_config("demo")["path"] == tmp_path
+        assert registry.get_agent("demo") is not None
+
+    def test_creates_workspace_through_api(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        client = TestClient(create_app(projects_root=workspace))
+
+        response = client.post(
+            "/workspace",
+            json={"path": str(workspace)},
+        )
+
+        assert response.status_code == 201
+        assert response.json() == {"path": str(workspace)}
+        assert workspace.is_dir()
+
+    def test_selects_project_folder_through_native_dialog(
+            self, tmp_path, monkeypatch
+    ):
+        from web import app as web_app_module
+
+        monkeypatch.setattr(
+            web_app_module,
+            "select_folder_dialog",
+            lambda: str(tmp_path),
+            raising=False,
+        )
+
+        client = TestClient(create_app(projects_root=tmp_path))
+
+        response = client.get("/select-folder")
+
+        assert response.status_code == 200
+        assert response.json() == {"path": str(tmp_path)}
+
+
+
+
+
+
 
