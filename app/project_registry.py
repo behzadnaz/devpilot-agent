@@ -19,3 +19,18 @@ class ProjectRegistry:
 
         config = self.get_config(project_id)
         return self._agent_factory(project_id, config)
+
+
+    def add_project(self, project_id, config):
+        """Register a new project without replacing an existing one."""
+        if project_id in self._projects:
+            raise ValueError(f"Project already exists: {project_id}")
+
+        self._projects[project_id] = dict(config)
+
+    def list_projects(self):
+        """Return the registered project configurations."""
+        return {
+            project_id: dict(config)
+            for project_id, config in self._projects.items()
+        }

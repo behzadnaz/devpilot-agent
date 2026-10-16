@@ -1,5 +1,6 @@
 from app.project_registry import ProjectRegistry
 from app.tools import ToolSet
+import pytest
 
 
 class _ProjectRegistryTest:
@@ -128,4 +129,47 @@ class _ProjectRegistryTest:
         assert development_agent["project_id"] == "development"
         assert development_agent["path"] == "projects/development"
         assert len(created_agents) == 2
+
+
+    def test_registry_can_add_and_list_projects(self, tmp_path):
+        registry = ProjectRegistry({
+            "devpilot": {
+                "path": tmp_path / "devpilot",
+                "workflow": "development",
+            },
+        })
+
+        registry.add_project(
+            "my-project",
+            {
+                "path": tmp_path / "my-project",
+                "workflow": "development",
+            },
+        )
+
+        projects = registry.list_projects()
+
+        assert "devpilot" in projects
+        assert "my-project" in projects
+        assert projects["my-project"]["path"] == tmp_path / "my-project"
+
+    def test_registry_rejects_duplicate_project_ids(self, tmp_path):
+        registry = ProjectRegistry({
+            "my-project": {
+                "path": tmp_path / "original",
+                "workflow": "development",
+            },
+        })
+
+        with pytest.raises(ValueError, match="Project already exists"):
+            registry.add_project(
+                "my-project",
+                {
+                    "path": tmp_path / "replacement",
+                    "workflow": "planning",
+                },
+            )
+
+        assert registry.get_config("my-project")["path"] == tmp_path / "original"
+
 

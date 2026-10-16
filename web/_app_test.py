@@ -154,3 +154,108 @@ class _AppTest:
         assert (development_path / "code.py").exists()
         assert not (development_path / "planning.txt").exists()
 
+    def test_lists_registered_projects(self):
+        class ProjectRegistryStub:
+            def list_projects(self):
+                return {
+                    "devpilot": {
+                        "workflow": "development",
+                    },
+                    "my-project": {
+                        "workflow": "planning",
+                    },
+                }
+
+        app = create_app(
+            agent=None,
+            project_registry=ProjectRegistryStub(),
+        )
+        client = TestClient(app)
+
+        response = client.get("/projects")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "projects": [
+                {"id": "devpilot", "workflow": "development"},
+                {"id": "my-project", "workflow": "planning"},
+            ]
+        }
+
+    def test_creates_project_through_api(self, tmp_path):
+        class ProjectRegistryStub:
+            def __init__(self):
+                self.projects = {
+                    "devpilot": {
+                        "path": tmp_path / "devpilot",
+                        "workflow": "development",
+                    }
+                }
+
+            def list_projects(self):
+                return self.projects
+
+            def add_project(self, project_id, config):
+                if project_id in self.projects:
+                    raise ValueError(f"Project already exists: {project_id}")
+                self.projects[project_id] = dict(config)
+
+        registry = ProjectRegistryStub()
+        app = create_app(agent=None, project_registry=registry)
+        client = TestClient(app)
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "my-project",
+                "path": str(tmp_path / "my-project"),
+                "workflow": "planning",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json() == {
+            "id": "my-project",
+            "workflow": "planning",
+        }
+
+    def test_duplicate_project_creation_returns_conflict(self, tmp_path):
+        class ProjectRegistryStub:
+            def __init__(self):
+                self.projects = {
+                    "devpilot": {
+                        "path": tmp_path / "devpilot",
+                        "workflow": "development",
+                    }
+                }
+
+            def add_project(self, project_id, config):
+                if project_id in self.projects:
+                    raise ValueError(
+                        f"Project already exists: {project_id}"
+                    )
+                self.projects[project_id] = dict(config)
+
+            def list_projects(self):
+                return self.projects
+
+        app = create_app(
+            agent=None,
+            project_registry=ProjectRegistryStub(),
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "devpilot",
+                "path": str(tmp_path / "replacement"),
+                "workflow": "planning",
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "Project already exists: devpilot"
+        )
+
