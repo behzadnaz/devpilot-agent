@@ -1,8 +1,20 @@
 from fastapi.testclient import TestClient
-
 from web._agent_stub import _AgentStub
+from app.tools import ToolSet
+from app.agent_loop import AgentLoop
+from app.reply_parser import ReplyParser
+from app._llm_stub import _LLMStub, final_message
+
 from web.app import create_app
 
+class _ProjectRegistryStub:
+    """Provides a separate agent for each project."""
+
+    def __init__(self, agents):
+        self._agents = agents
+
+    def get_agent(self, project_id):
+        return self._agents[project_id]
 
 class _AppTest:
     def test_start_task_request_streams_the_events(self):
@@ -32,3 +44,113 @@ class _AppTest:
         assert page.status_code == 200, "the page is found"
         assert 'id="message"' in page.text, "the page has a box for the message"
         assert 'id="steps"' in page.text, "the page has a list for the steps"
+
+    def test_task_is_sent_to_the_selected_project_agent(self):
+        planning_agent = _AgentStub()
+        development_agent = _AgentStub()
+
+        registry = _ProjectRegistryStub({
+            "planning": planning_agent,
+            "development": development_agent,
+        })
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "development",
+                "message": "Write a unit test",
+            },
+        )
+
+        assert response.status_code == 200
+        assert development_agent.run_called_with == "Write a unit test"
+        assert planning_agent.run_called_with is None
+
+    def test_unknown_project_does_not_run_any_agent(self):
+        planning_agent = _AgentStub()
+        development_agent = _AgentStub()
+
+        registry = _ProjectRegistryStub({
+            "planning": planning_agent,
+            "development": development_agent,
+        })
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "unknown-project",
+                "message": "Change a function",
+            },
+        )
+
+        assert response.status_code == 404
+        assert planning_agent.run_called_with is None
+        assert development_agent.run_called_with is None
+
+    def test_each_project_uses_its_own_agent(self, tmp_path):
+        planning_path = tmp_path / "planning"
+        development_path = tmp_path / "development"
+        planning_path.mkdir()
+        development_path.mkdir()
+
+        planning_path.joinpath("planning.txt").write_text("Planning project")
+        development_path.joinpath("code.py").write_text("print('development')")
+
+        required = {
+            "list_files": [],
+            "read_file": ["path"],
+            "create_file": ["path", "content"],
+        }
+
+        def make_agent(path):
+            return AgentLoop(
+                _LLMStub([final_message("Finished")]),
+                ToolSet(path),
+                ReplyParser(required),
+                tool_schemas=[],
+                system_prompt="You are a project-specific agent.",
+            )
+
+        planning_agent = make_agent(planning_path)
+        development_agent = make_agent(development_path)
+
+        registry = _ProjectRegistryStub({
+            "planning": planning_agent,
+            "development": development_agent,
+        })
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "planning",
+                "message": "Review this project",
+            },
+        )
+
+        assert response.status_code == 200
+        assert (planning_path / "planning.txt").exists()
+        assert not (planning_path / "code.py").exists()
+        assert (development_path / "code.py").exists()
+        assert not (development_path / "planning.txt").exists()
+
