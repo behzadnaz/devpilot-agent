@@ -1,13 +1,17 @@
-from fastapi.testclient import TestClient
-from web._agent_stub import _AgentStub
-from app.tools import ToolSet
-from app.agent_loop import AgentLoop
-from app.reply_parser import ReplyParser
-from app._llm_stub import _LLMStub, final_message
-from app.project_registry import ProjectRegistry
+
 from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app._llm_stub import _LLMStub, final_message
+from app.agent_loop import AgentLoop
+from app.project_registry import ProjectRegistry
+from app.reply_parser import ReplyParser
+from app.tools import ToolSet
+from web._agent_stub import _AgentStub
 import web.app as web_app_module
 from web.app import create_app
+
 
 class _ProjectRegistryStub:
     """Provides a separate agent for each project."""
@@ -18,34 +22,43 @@ class _ProjectRegistryStub:
     def get_agent(self, project_id):
         return self._agents[project_id]
 
+
 class _AppTest:
     def test_start_task_request_streams_the_events(self):
         agent = _AgentStub()
-        client = TestClient(create_app(agent, start=lambda job: job()))
+        client = TestClient(
+            create_app(agent, start=lambda job: job())
+        )
 
-        started = client.post("/tasks", json={"message": "Create a calculator"})
+        started = client.post(
+            "/tasks",
+            json={"message": "Create a calculator"},
+        )
         everything = client.get("/events").json()
         rest = client.get("/events", params={"after": 1}).json()
 
         assert started.status_code == 200, "the task starts"
-        assert agent.run_called_with == "Create a calculator", "the agent got the message"
+        assert agent.run_called_with == "Create a calculator"
         assert everything == {
             "events": [
                 {"type": "status", "text": "step 1 of 20"},
                 {"type": "message", "text": "Done"},
             ],
             "next": 2,
-        }, "all events"
-        assert rest == {"events": [{"type": "message", "text": "Done"}], "next": 2}, "only the new events"
+        }
+        assert rest == {
+            "events": [{"type": "message", "text": "Done"}],
+            "next": 2,
+        }
 
     def test_the_page_is_served(self):
         client = TestClient(create_app(_AgentStub()))
 
         page = client.get("/")
 
-        assert page.status_code == 200, "the page is found"
-        assert 'id="message"' in page.text, "the page has a box for the message"
-        assert 'id="steps"' in page.text, "the page has a list for the steps"
+        assert page.status_code == 200
+        assert 'id="message"' in page.text
+        assert 'id="steps"' in page.text
 
     def test_task_is_sent_to_the_selected_project_agent(self):
         planning_agent = _AgentStub()
@@ -109,8 +122,12 @@ class _AppTest:
         planning_path.mkdir()
         development_path.mkdir()
 
-        planning_path.joinpath("planning.txt").write_text("Planning project")
-        development_path.joinpath("code.py").write_text("print('development')")
+        (planning_path / "planning.txt").write_text(
+            "Planning project"
+        )
+        (development_path / "code.py").write_text(
+            "print('development')"
+        )
 
         required = {
             "list_files": [],
@@ -199,12 +216,18 @@ class _AppTest:
 
             def add_project(self, project_id, config):
                 if project_id in self.projects:
-                    raise ValueError(f"Project already exists: {project_id}")
+                    raise ValueError(
+                        f"Project already exists: {project_id}"
+                    )
                 self.projects[project_id] = dict(config)
 
         registry = ProjectRegistryStub()
-        app = create_app(agent=None, project_registry=registry)
-        client = TestClient(app)
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+            )
+        )
 
         response = client.post(
             "/projects",
@@ -241,11 +264,12 @@ class _AppTest:
             def list_projects(self):
                 return self.projects
 
-        app = create_app(
-            agent=None,
-            project_registry=ProjectRegistryStub(),
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=ProjectRegistryStub(),
+            )
         )
-        client = TestClient(app)
 
         response = client.post(
             "/projects",
@@ -309,7 +333,9 @@ class _AppTest:
 
         assert app is not None
 
-    def test_app_startup_wires_real_agent_components(monkeypatch, tmp_path):
+    def test_app_startup_wires_real_agent_components(
+        self, monkeypatch, tmp_path
+    ):
         class FakeAgent:
             def run(self, message, stream):
                 pass
@@ -331,9 +357,11 @@ class _AppTest:
         app = create_app(project_registry=registry)
 
         assert app is not None
-        assert registry.get_agent("demo").__class__ is FakeAgent
+        assert isinstance(registry.get_agent("demo"), FakeAgent)
 
-    def test_create_application_wires_project_registry(monkeypatch, tmp_path):
+    def test_create_application_wires_project_registry(
+        self, monkeypatch, tmp_path
+    ):
         class FakeAgent:
             def run(self, message, stream):
                 pass
@@ -355,11 +383,11 @@ class _AppTest:
         app = web_app_module.create_app(project_registry=registry)
 
         assert app is not None
-        assert registry.get_agent("demo").__class__ is FakeAgent
+        assert isinstance(registry.get_agent("demo"), FakeAgent)
 
-    def test_build_project_registry_connects_agent_factory(self, monkeypatch, tmp_path):
-        import web.app as web_app_module
-
+    def test_build_project_registry_connects_agent_factory(
+        self, monkeypatch, tmp_path
+    ):
         class FakeLLM:
             pass
 
@@ -389,7 +417,12 @@ class _AppTest:
         )
 
         registry = web_app_module.build_project_registry(
-            {"demo": {"path": tmp_path, "workflow": "software-development"}}
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            }
         )
 
         assert registry.get_config("demo")["path"] == tmp_path
@@ -410,10 +443,8 @@ class _AppTest:
         assert workspace.is_dir()
 
     def test_selects_project_folder_through_native_dialog(
-            self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch
     ):
-        from web import app as web_app_module
-
         monkeypatch.setattr(
             web_app_module,
             "select_folder_dialog",
@@ -429,8 +460,48 @@ class _AppTest:
         assert response.json() == {"path": str(tmp_path)}
 
 
+    def test_agent_core_accepts_message_without_creating_project(
+        self, tmp_path
+    ):
+        agent_core = _AgentStub()
+
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={"message": "Explain your architecture"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "started": True,
+            "scope": "agent_core",
+        }
+        assert agent_core.run_called_with == "Explain your architecture"
+
+        core_events = client.get("/agent-core/events").json()
+        project_events = client.get("/events").json()
+
+        assert core_events["events"] == [
+            {"type": "status", "text": "step 1 of 20"},
+            {"type": "message", "text": "Done"},
+        ]
+        assert project_events["events"] == []
 
 
+    def test_page_has_separate_agent_core_and_project_chats(self):
+        client = TestClient(create_app(_AgentStub()))
 
+        response = client.get("/")
 
+        assert response.status_code == 200
+        assert 'id="agentCoreMessage"' in response.text
+        assert 'id="projectMessage"' in response.text
+        assert 'id="projectChat"' in response.text
 

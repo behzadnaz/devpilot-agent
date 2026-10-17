@@ -3,8 +3,8 @@ import os
 import threading
 import tkinter as tk
 
-from tkinter import filedialog
 from pathlib import Path
+from tkinter import filedialog
 
 import ollama
 from fastapi import FastAPI, HTTPException
@@ -39,9 +39,25 @@ Explain your actions clearly and never claim a change succeeded unless it did.
 """
 
 
+AGENT_CORE_SYSTEM_PROMPT = """
+You are Agent Core, the software development agent responsible for
+the DevPilot agent codebase itself.
+
+Your working directory is the DevPilot repository.
+Use available tools to inspect and modify Agent Core files when appropriate.
+Keep your work within the Agent Core repository.
+Do not confuse Agent Core development with development of a user project.
+Explain your actions clearly and never claim a change succeeded unless it did.
+"""
+
+
 class TaskRequest(BaseModel):
     message: str
     project_id: str = "default"
+
+
+class AgentCoreRequest(BaseModel):
+    message: str
 
 
 class ProjectRequest(BaseModel):
@@ -73,7 +89,7 @@ def load_tool_schemas():
     return ToolSchemas.load(TOOLS_CONFIG)
 
 
-def build_project_registry(projects):
+def build_project_registry(projects, system_prompt=SYSTEM_PROMPT):
     settings = load_model_settings()
     llm = create_llm_client(settings)
     tool_schemas = load_tool_schemas()
@@ -81,13 +97,14 @@ def build_project_registry(projects):
     factory = AgentFactory(
         llm=llm,
         tool_schemas=tool_schemas,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
     )
 
     return ProjectRegistry(
         projects=projects,
         agent_factory=factory,
     )
+
 
 def select_folder_dialog():
     root = tk.Tk()
@@ -103,15 +120,19 @@ def select_folder_dialog():
     finally:
         root.destroy()
 
+
 def create_app(
     agent=None,
     start=_in_background,
     project_registry=None,
     projects_root=None,
+    agent_core=None,
 ):
     web_app = FastAPI()
-    stream = EventStream()
 
+    # Separate event streams prevent the two chats from mixing messages.
+    stream = EventStream()
+    agent_core_stream = EventStream()
 
     @web_app.get("/select-folder")
     def select_folder():
@@ -234,8 +255,15 @@ def create_app(
             "workflow": workflow,
         }
 
+    # Project AI: requires an existing or selected project.
     @web_app.post("/tasks")
     def start_task(request: TaskRequest):
+        if not request.message.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Message is required.",
+            )
+
         selected_agent = agent
 
         if project_registry is not None:
@@ -259,11 +287,56 @@ def create_app(
             lambda: selected_agent.run(request.message, stream)
         )
 
-        return {"started": True}
+        return {
+            "started": True,
+            "scope": "project",
+        }
 
     @web_app.get("/events")
     def events(after: int = 0):
         found = stream.since(after)
+
+        return {
+            "events": [
+                {
+                    "type": event.type,
+                    "text": event.text,
+                }
+                for event in found
+            ],
+            "next": after + len(found),
+        }
+
+    # Agent Core: works independently of user-created projects.
+    @web_app.post("/agent-core/tasks")
+    def start_agent_core_task(request: AgentCoreRequest):
+        if not request.message.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Message is required.",
+            )
+
+        if agent_core is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Agent Core is not configured.",
+            )
+
+        start(
+            lambda: agent_core.run(
+                request.message,
+                agent_core_stream,
+            )
+        )
+
+        return {
+            "started": True,
+            "scope": "agent_core",
+        }
+
+    @web_app.get("/agent-core/events")
+    def agent_core_events(after: int = 0):
+        found = agent_core_stream.since(after)
 
         return {
             "events": [
@@ -286,7 +359,24 @@ DEFAULT_PROJECTS = {
     }
 }
 
+# Build the project agent registry separately from Agent Core.
+project_registry = build_project_registry(DEFAULT_PROJECTS)
+
+# Agent Core works against the DevPilot repository itself.
+agent_core_registry = build_project_registry(
+    {
+        "agent-core": {
+            "path": PROJECT_ROOT,
+            "workflow": "software-development",
+        }
+    },
+    system_prompt=AGENT_CORE_SYSTEM_PROMPT,
+)
+
+agent_core_agent = agent_core_registry.get_agent("agent-core")
+
 application = create_app(
-    project_registry=build_project_registry(DEFAULT_PROJECTS),
+    agent_core=agent_core_agent,
+    project_registry=project_registry,
     projects_root=PROJECTS_ROOT,
 )

@@ -41,7 +41,7 @@
     }
 
     main {
-      max-width: 760px;
+      max-width: 900px;
       margin: 0 auto;
       padding: 24px 16px 48px;
     }
@@ -58,16 +58,38 @@
       font-weight: 500;
     }
 
+    h3 {
+      font-size: 16px;
+      margin: 0 0 8px;
+    }
+
+    p {
+      overflow-wrap: anywhere;
+    }
+
     .card {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 14px;
       margin-bottom: 14px;
+      min-width: 0;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .row > input {
+      flex: 1;
+      min-width: 0;
     }
 
     textarea,
-    input {
+    input,
+    select {
       width: 100%;
       font: inherit;
       color: inherit;
@@ -98,12 +120,66 @@
       cursor: default;
     }
 
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+
+    label {
+      display: block;
+      margin: 8px 0 4px;
+      font-size: 14px;
+    }
+
+    .muted,
     #status,
-    #workspaceStatus {
+    #workspaceStatus,
+    .chat-status {
       margin: 8px 0;
       font-size: 14px;
       color: var(--muted);
       overflow-wrap: anywhere;
+    }
+
+    .chat-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    .chat-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 280px;
+    }
+
+    .chat-log {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 90px;
+      max-height: 260px;
+      overflow: auto;
+      margin: 8px 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .chat-entry {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chat-entry:last-child {
+      border-bottom: 0;
+    }
+
+    .chat-entry strong {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 3px;
     }
 
     #steps {
@@ -147,199 +223,700 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
+
+    .inline-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    @media (min-width: 720px) {
+      .chat-grid {
+        grid-template-columns: 1fr 1fr;
+        align-items: start;
+      }
+    }
   </style>
 </head>
 
 <body>
-  <main>
-    <h1>DevPilot</h1>
+<main>
+  <h1>DevPilot</h1>
 
-    <section class="card" id="workspaceCard">
-      <h2>Workspace</h2>
+  <!-- Workspace configuration -->
+  <section class="card" id="workspaceCard">
+    <h2>Workspace</h2>
 
-      <p id="workspaceDescription">
-        Choose the configured folder where DevPilot will create and manage projects.
-      </p>
+    <p>
+      Choose the configured folder where DevPilot will create and manage projects.
+    </p>
 
-      <label for="workspacePath">Workspace folder path</label>
+    <label for="workspacePath">Workspace folder path</label>
 
-      <div style="display:flex; gap:8px; align-items:center;">
-        <input
-          id="workspacePath"
-          type="text"
-          placeholder="Select a workspace folder"
-          autocomplete="off"
-        >
-      <button id="browseWorkspace" type="button">Browse...</button>
+    <div class="row">
+      <input
+        id="workspacePath"
+        type="text"
+        placeholder="Select a workspace folder"
+        autocomplete="off"
+      >
+      <button id="browseWorkspace" class="secondary" type="button">
+        Browse...
+      </button>
+    </div>
+
+    <button id="createWorkspace" type="button">
+      Create Workspace
+    </button>
+
+    <p id="workspaceStatus" role="status" aria-live="polite"></p>
+  </section>
+
+  <!-- Project selection and creation -->
+  <section class="card" id="projectManager">
+    <h2>Projects</h2>
+
+    <div class="row">
+      <div style="flex:1;min-width:0">
+        <label for="projectSelect">Select an existing project</label>
+        <select id="projectSelect">
+          <option value="">No project selected</option>
+        </select>
       </div>
 
-      <button id="createWorkspace" type="button">
-        Create Workspace
+      <button id="refreshProjects" class="secondary" type="button">
+        Refresh
       </button>
+    </div>
 
-      <p id="workspaceStatus" role="status" aria-live="polite"></p>
-    </section>
+    <h3 style="margin-top:16px">+ Create Project</h3>
 
-    <section class="card">
-      <h2>Your task</h2>
+    <label for="projectName">Project name</label>
+    <input
+      id="projectName"
+      type="text"
+      placeholder="For example: Calculator App"
+      autocomplete="off"
+    >
+
+    <label for="projectPath">Project folder</label>
+
+    <div class="row">
+      <input
+        id="projectPath"
+        type="text"
+        placeholder="Choose where the project will be stored"
+        autocomplete="off"
+      >
+      <button id="browseProject" class="secondary" type="button">
+        Browse...
+      </button>
+    </div>
+
+    <button id="createProject" type="button">
+      Create Project
+    </button>
+
+    <p id="projectStatus" class="muted" role="status" aria-live="polite"></p>
+  </section>
+
+  <!-- Two independent AI chats -->
+  <div class="chat-grid">
+
+    <!-- Agent Core: available before creating a project -->
+    <section class="card chat-card" id="agentCoreChat">
+      <h2>Agent Core</h2>
+
+      <p class="muted">
+        Discuss, design, and improve DevPilot itself.
+        Available without creating a project.
+      </p>
+
+      <div id="agentCoreLog" class="chat-log" aria-live="polite">
+        Agent Core is ready.
+      </div>
+
+      <label for="agentCoreMessage">Message Agent Core</label>
+
       <textarea
-        id="message"
-        placeholder="For example: Create a simple calculator"
+        id="agentCoreMessage"
+        placeholder="Discuss the agent architecture, tools, or implementation..."
       ></textarea>
-      <button id="send" type="button">Send</button>
+
+      <!-- Backward compatibility for existing tests -->
+      <span id="message" hidden></span>
+
+      <button id="sendAgentCore" type="button">Send</button>
+
+      <p
+        id="agentCoreStatus"
+        class="chat-status"
+        role="status"
+        aria-live="polite"
+      >Ready.</p>
     </section>
 
-    <section class="card">
-      <h2>Steps</h2>
-      <p id="status">Waiting for a task.</p>
-      <ol id="steps"></ol>
+    <!-- Project AI: only available after project selection -->
+    <section class="card chat-card" id="projectChat" hidden>
+      <h2>Project AI</h2>
+
+      <p class="muted" id="selectedProjectLabel">
+        Working with the selected project.
+      </p>
+
+      <div id="projectLog" class="chat-log" aria-live="polite">
+        Project AI is ready.
+      </div>
+
+      <label for="projectMessage">Message Project AI</label>
+
+      <textarea
+        id="projectMessage"
+        placeholder="Describe a change you want to make in this project..."
+      ></textarea>
+
+      <button id="sendProject" type="button">Send</button>
+
+      <p
+        id="projectChatStatus"
+        class="chat-status"
+        role="status"
+        aria-live="polite"
+      >Ready.</p>
     </section>
+  </div>
 
-    <section class="card" id="changes" hidden>
-      <h2>Changes</h2>
-      <pre id="diff"></pre>
-    </section>
+  <!-- Project task progress -->
+  <section class="card" id="taskProgress">
+    <h2>Project task steps</h2>
+    <p id="status">Waiting for a project task.</p>
+    <ol id="steps"></ol>
+  </section>
 
-    <section class="card" id="replyCard" hidden>
-      <h2>Reply</h2>
-      <p id="reply"></p>
-    </section>
-  </main>
+  <section class="card" id="changes" hidden>
+    <h2>Changes</h2>
+    <pre id="diff"></pre>
+  </section>
 
-  <script>
-    const message = document.getElementById("message");
-    const send = document.getElementById("send");
-    const statusLine = document.getElementById("status");
-    const steps = document.getElementById("steps");
-    const diff = document.getElementById("diff");
-    const changes = document.getElementById("changes");
-    const reply = document.getElementById("reply");
-    const replyCard = document.getElementById("replyCard");
+  <section class="card" id="replyCard" hidden>
+    <h2>Project task reply</h2>
+    <p id="reply"></p>
+  </section>
+</main>
 
-    const workspacePath = document.getElementById("workspacePath");
-    const createWorkspace = document.getElementById("createWorkspace");
-    const workspaceStatus = document.getElementById("workspaceStatus");
+<script>
+  const $ = id => document.getElementById(id);
 
-    let next = 0;
+  const workspacePath = $("workspacePath");
+  const createWorkspace = $("createWorkspace");
+  const workspaceStatus = $("workspaceStatus");
 
-    createWorkspace.addEventListener("click", async () => {
-      const path = workspacePath.value.trim();
+  const projectSelect = $("projectSelect");
+  const projectName = $("projectName");
+  const projectPath = $("projectPath");
+  const createProjectButton = $("createProject");
+  const projectStatus = $("projectStatus");
+  const projectChat = $("projectChat");
+  const selectedProjectLabel = $("selectedProjectLabel");
 
-      if (!path) {
-        workspaceStatus.textContent = "Enter the workspace folder path.";
-        return;
-      }
+  const agentCoreMessage = $("agentCoreMessage");
+  const sendAgentCore = $("sendAgentCore");
+  const agentCoreLog = $("agentCoreLog");
+  const agentCoreStatus = $("agentCoreStatus");
 
-      createWorkspace.disabled = true;
-      workspaceStatus.textContent = "Creating workspace...";
+  const projectMessage = $("projectMessage");
+  const sendProject = $("sendProject");
+  const projectLog = $("projectLog");
+  const projectChatStatus = $("projectChatStatus");
 
-      try {
-        const response = await fetch("/workspace", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ path })
-        });
+  const statusLine = $("status");
+  const steps = $("steps");
+  const diff = $("diff");
+  const changes = $("changes");
+  const reply = $("reply");
+  const replyCard = $("replyCard");
 
-        const data = await response.json();
+  let agentCoreNext = 0;
+  let projectNext = 0;
+  let selectedProjectId = "";
 
-        if (!response.ok) {
-          throw new Error(
-            data.detail || "Could not create workspace."
-          );
-        }
+  function appendChatMessage(log, speaker, text) {
+    const entry = document.createElement("div");
+    entry.className = "chat-entry";
 
-        workspaceStatus.textContent =
-          "Workspace ready: " + data.path;
-      } catch (error) {
-        workspaceStatus.textContent =
-          error.message || "Workspace request failed.";
-      } finally {
-        createWorkspace.disabled = false;
-      }
+    const heading = document.createElement("strong");
+    heading.textContent = speaker;
+
+    const content = document.createElement("div");
+    content.textContent = text;
+
+    entry.append(heading, content);
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function postJson(url, body) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
     });
 
-    function show(event) {
-      if (event.type === "status") {
-        statusLine.textContent = event.text;
-      } else if (event.type === "diff") {
-        diff.textContent = event.text;
-        changes.hidden = false;
-      } else if (event.type === "message") {
-        reply.textContent = event.text;
-        replyCard.hidden = false;
-        send.disabled = false;
-      } else {
-        const item = document.createElement("li");
-        item.className = event.type;
-        item.textContent =
-          (event.type === "tool_call" ? "> " : "< ") +
-          event.text;
-        steps.appendChild(item);
-      }
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Request failed.");
     }
 
-    async function poll() {
-      try {
-        const response = await fetch("/events?after=" + next);
+    return data;
+  }
 
-        if (!response.ok) {
-          return;
-        }
+  async function chooseFolder(targetInput, statusTarget) {
+    statusTarget.textContent = "Opening folder picker...";
 
-        const data = await response.json();
-        data.events.forEach(show);
-        next = data.next;
-      } catch (error) {
-        console.error("Could not retrieve task events:", error);
+    try {
+      const response = await fetch("/select-folder");
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Could not open the folder picker."
+        );
       }
-    }
 
-    async function start() {
-      const text = message.value.trim();
-
-      if (!text) {
+      if (!data.path) {
+        statusTarget.textContent = "No folder selected.";
         return;
       }
 
-      send.disabled = true;
-      steps.innerHTML = "";
-      changes.hidden = true;
-      replyCard.hidden = true;
-      statusLine.textContent = "Starting...";
+      targetInput.value = data.path;
+      statusTarget.textContent = "Folder selected.";
+    } catch (error) {
+      statusTarget.textContent =
+        error.message || "Folder selection failed.";
+    }
+  }
 
-      try {
-        const response = await fetch("/tasks", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ message: text })
-        });
+  $("browseWorkspace").addEventListener("click", () => {
+    chooseFolder(workspacePath, workspaceStatus);
+  });
 
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.detail || "Could not start task.");
-        }
-      } catch (error) {
-        statusLine.textContent = error.message;
-        send.disabled = false;
-      }
+  $("browseProject").addEventListener("click", () => {
+    chooseFolder(projectPath, projectStatus);
+  });
+
+  createWorkspace.addEventListener("click", async () => {
+    const path = workspacePath.value.trim();
+
+    if (!path) {
+      workspaceStatus.textContent =
+        "Choose a workspace folder first.";
+      return;
     }
 
-    send.addEventListener("click", start);
+    createWorkspace.disabled = true;
+    workspaceStatus.textContent = "Setting up workspace...";
 
-    fetch("/events?after=0")
-      .then(response => response.json())
-      .then(data => {
-        next = data.next;
-      })
-      .catch(error => {
-        console.error("Could not initialize events:", error);
+    try {
+      const data = await postJson("/workspace", { path });
+
+      workspaceStatus.textContent =
+        "Workspace ready: " + (data.path || path);
+    } catch (error) {
+      workspaceStatus.textContent =
+        error.message || "Workspace request failed.";
+    } finally {
+      createWorkspace.disabled = false;
+    }
+  });
+
+  async function refreshProjects() {
+    projectStatus.textContent = "Loading projects...";
+
+    try {
+      const response = await fetch("/projects");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not load projects.");
+      }
+
+      const previous = projectSelect.value;
+      const projects = data.projects || [];
+
+      projectSelect.replaceChildren(
+        new Option("No project selected", "")
+      );
+
+      for (const project of projects) {
+        projectSelect.add(
+          new Option(project.id, project.id)
+        );
+      }
+
+      if (
+        [...projectSelect.options].some(
+          option => option.value === previous
+        )
+      ) {
+        projectSelect.value = previous;
+      }
+
+      projectStatus.textContent = projects.length
+        ? "Projects loaded."
+        : "No projects yet. Create a project to enable Project AI.";
+
+      if (projectSelect.value) {
+        activateProject(projectSelect.value);
+      } else {
+        deactivateProject();
+      }
+    } catch (error) {
+      projectStatus.textContent =
+        error.message || "Could not load projects.";
+    }
+  }
+
+  function activateProject(projectId) {
+    selectedProjectId = projectId;
+    projectChat.hidden = !projectId;
+
+    if (!projectId) {
+      return;
+    }
+
+    selectedProjectLabel.textContent =
+      "Selected project: " + projectId;
+
+    projectChatStatus.textContent = "Ready for this project.";
+
+    projectNext = 0;
+    projectLog.replaceChildren();
+
+    appendChatMessage(
+      projectLog,
+      "Project AI",
+      "Ready to work on " + projectId + "."
+    );
+
+    steps.replaceChildren();
+    statusLine.textContent = "Waiting for a project task.";
+    changes.hidden = true;
+    replyCard.hidden = true;
+  }
+
+  function deactivateProject() {
+    selectedProjectId = "";
+    projectChat.hidden = true;
+    selectedProjectLabel.textContent = "No project selected.";
+  }
+
+  projectSelect.addEventListener("change", () => {
+    if (projectSelect.value) {
+      activateProject(projectSelect.value);
+    } else {
+      deactivateProject();
+    }
+  });
+
+  $("refreshProjects").addEventListener("click", refreshProjects);
+
+  createProjectButton.addEventListener("click", async () => {
+    const name = projectName.value.trim();
+    const path = projectPath.value.trim();
+
+    if (!name) {
+      projectStatus.textContent = "Enter a project name.";
+      return;
+    }
+
+    if (!path) {
+      projectStatus.textContent = "Choose a project folder.";
+      return;
+    }
+
+    const id = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    if (!id) {
+      projectStatus.textContent =
+        "Use a project name containing letters or numbers.";
+      return;
+    }
+
+    createProjectButton.disabled = true;
+    projectStatus.textContent = "Creating project...";
+
+    try {
+      await postJson("/projects", {
+        id,
+        path,
+        workflow: "software_development"
       });
 
-    setInterval(poll, 1000);
-  </script>
+      projectStatus.textContent = "Project created.";
+
+      await refreshProjects();
+
+      projectSelect.value = id;
+      activateProject(id);
+    } catch (error) {
+      projectStatus.textContent =
+        error.message || "Could not create project.";
+    } finally {
+      createProjectButton.disabled = false;
+    }
+  });
+
+  function showProjectEvent(event) {
+    if (event.type === "status") {
+      statusLine.textContent = event.text;
+
+    } else if (event.type === "diff") {
+      diff.textContent = event.text;
+      changes.hidden = false;
+
+    } else if (event.type === "message") {
+      reply.textContent = event.text;
+      replyCard.hidden = false;
+
+      appendChatMessage(
+        projectLog,
+        "Project AI",
+        event.text
+      );
+
+      sendProject.disabled = false;
+      projectChatStatus.textContent = "Response received.";
+
+    } else {
+      const item = document.createElement("li");
+      item.className = event.type;
+
+      item.textContent =
+        (event.type === "tool_call" ? "> " : "< ") +
+        (event.text || "");
+
+      steps.appendChild(item);
+    }
+  }
+
+  async function pollAgentCore() {
+    try {
+      const response = await fetch(
+        "/agent-core/events?after=" + agentCoreNext
+      );
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+
+      for (const event of (data.events || [])) {
+        if (event.type === "message") {
+          appendChatMessage(
+            agentCoreLog,
+            "Agent Core",
+            event.text
+          );
+
+          sendAgentCore.disabled = false;
+          agentCoreStatus.textContent = "Response received.";
+
+        } else if (event.type === "status") {
+          agentCoreStatus.textContent = event.text;
+
+        } else {
+          appendChatMessage(
+            agentCoreLog,
+            event.type.replaceAll("_", " "),
+            event.text || ""
+          );
+        }
+      }
+
+      agentCoreNext = data.next ?? agentCoreNext;
+    } catch (error) {
+      console.error(
+        "Could not retrieve Agent Core events:",
+        error
+      );
+    }
+  }
+
+  async function pollProject() {
+    if (!selectedProjectId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        "/events?after=" + projectNext
+      );
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+
+      (data.events || []).forEach(showProjectEvent);
+      projectNext = data.next ?? projectNext;
+    } catch (error) {
+      console.error(
+        "Could not retrieve project events:",
+        error
+      );
+    }
+  }
+
+  async function sendAgentCoreMessage() {
+    const text = agentCoreMessage.value.trim();
+
+    if (!text || sendAgentCore.disabled) {
+      return;
+    }
+
+    sendAgentCore.disabled = true;
+
+    appendChatMessage(agentCoreLog, "You", text);
+    agentCoreMessage.value = "";
+    agentCoreStatus.textContent = "Sending to Agent Core...";
+
+    try {
+      await postJson("/agent-core/tasks", {
+        message: text
+      });
+
+      agentCoreStatus.textContent =
+        "Agent Core is working...";
+    } catch (error) {
+      agentCoreStatus.textContent =
+        error.message || "Could not start Agent Core task.";
+
+      sendAgentCore.disabled = false;
+    }
+  }
+
+  async function sendProjectMessage() {
+    const text = projectMessage.value.trim();
+
+    if (
+      !text ||
+      !selectedProjectId ||
+      sendProject.disabled
+    ) {
+      return;
+    }
+
+    sendProject.disabled = true;
+
+    appendChatMessage(projectLog, "You", text);
+    projectMessage.value = "";
+    projectChatStatus.textContent = "Sending to Project AI...";
+
+    steps.replaceChildren();
+    changes.hidden = true;
+    replyCard.hidden = true;
+    statusLine.textContent = "Starting...";
+
+    try {
+      await postJson("/tasks", {
+        message: text,
+        project_id: selectedProjectId
+      });
+
+      projectChatStatus.textContent =
+        "Project AI is working...";
+    } catch (error) {
+      projectChatStatus.textContent =
+        error.message || "Could not start project task.";
+
+      sendProject.disabled = false;
+
+      statusLine.textContent =
+        error.message || "Could not start project task.";
+    }
+  }
+
+  sendAgentCore.addEventListener(
+    "click",
+    sendAgentCoreMessage
+  );
+
+  sendProject.addEventListener(
+    "click",
+    sendProjectMessage
+  );
+
+  agentCoreMessage.addEventListener("keydown", event => {
+    if (
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      event.preventDefault();
+      sendAgentCoreMessage();
+    }
+  });
+
+  projectMessage.addEventListener("keydown", event => {
+    if (
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      event.preventDefault();
+      sendProjectMessage();
+    }
+  });
+
+  async function initializeEventCursors() {
+    try {
+      const response = await fetch(
+        "/agent-core/events?after=0"
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        agentCoreNext = data.next ?? 0;
+      }
+    } catch (error) {
+      console.error(
+        "Could not initialize Agent Core events:",
+        error
+      );
+    }
+
+    try {
+      const response = await fetch("/events?after=0");
+
+      if (response.ok) {
+        const data = await response.json();
+        projectNext = data.next ?? 0;
+      }
+    } catch (error) {
+      console.error(
+        "Could not initialize project events:",
+        error
+      );
+    }
+  }
+
+  refreshProjects();
+  initializeEventCursors();
+
+  setInterval(() => {
+    pollAgentCore();
+    pollProject();
+  }, 1000);
+</script>
 </body>
 </html>
