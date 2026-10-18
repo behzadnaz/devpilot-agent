@@ -35,7 +35,7 @@ class _AppTest:
         page = client.get("/")
 
         assert page.status_code == 200, "the page is found"
-        assert 'id="message"' in page.text, "the page has a box for the message"
+        assert 'id="projectMessage"' in page.text, "the page has a box for the message"
         assert 'id="steps"' in page.text, "the page has a list for the steps"
 
     def test_task_is_sent_to_the_selected_project_agent(self):
@@ -162,7 +162,7 @@ class _AppTest:
         assert page.status_code == 200, "the page is found"
         assert 'id="agentCoreMessage"' in page.text, "the core chat has its message box"
         assert 'id="projectMessage"' in page.text, "the project chat has its message box"
-        assert 'id="projectChat"' in page.text, "the project chat has its log"
+        assert 'id="projectLog"' in page.text, "the project chat has its log"
 
     def test_approval_endpoint_accepts_a_decision(self):
         client = TestClient(create_app(_AgentStub()))

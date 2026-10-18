@@ -477,7 +477,7 @@ agent_core_agent = agent_core_registry.get_agent("agent-core")
 
 
 # Create the FastAPI application.
-application = create_app(
+app = create_app(
     agent_core=agent_core_agent,
     project_registry=project_registry,
     projects_root=PROJECTS_ROOT,
