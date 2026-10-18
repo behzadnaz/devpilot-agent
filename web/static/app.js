@@ -319,7 +319,7 @@ async function pollAgentCore() {
 // One button, two states: arrow-up to send, square to stop while the agent is working.
 function paintSendButton(button, busy, hasText) {
   button.classList.toggle("busy", busy);
-  button.innerHTML = icon(busy ? "stop" : "arrowup");
+  button.innerHTML = icon(busy ? "stop" : "arrowright");
   button.setAttribute("aria-label", busy ? "Stop" : "Send message");
   button.disabled = !busy && !hasText;
 }
@@ -852,9 +852,42 @@ async function openFile(path) {
     let html = data.content || "";
 
     if (!/\.html?$/i.test(path)) {
-      const pre = document.createElement("pre");
-      pre.textContent = html;
-      html = '<body style="margin:12px;font:13px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap">' + pre.innerHTML + "</body>";
+
+const pre = document.createElement("pre");
+pre.textContent = html;
+
+html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    html {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      padding: 12px;
+      box-sizing: border-box;
+      color: #1f2937;
+      background: #fff;
+      font: 13px/1.55 Consolas, "Cascadia Code", monospace;
+      overflow: auto;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre;
+      overflow-wrap: normal;
+      tab-size: 4;
+      width: max-content;
+      min-width: 100%;
+    }
+  </style>
+</head>
+<body>${pre.outerHTML}</body>
+</html>`;
+
     }
 
     renderPreview({ title: path, html });
@@ -1676,11 +1709,11 @@ $("clearCore").addEventListener("click", () => {
 // The panel can be resized from its bottom right corner, and the size is remembered.
 try {
   const size = JSON.parse(recall("devpilot.coreSize") || "null");
-  if (size) { corePanel.style.width = size.w + "px"; corePanel.style.height = size.h + "px"; }
+     if (size && size.w) corePanel.style.width = size.w + "px";
 } catch (e) {}
 
 new ResizeObserver(() => {
-  if (!corePanel.hidden) remember("devpilot.coreSize", JSON.stringify({ w: corePanel.offsetWidth, h: corePanel.offsetHeight }));
+  if (!corePanel.hidden)    remember("devpilot.coreSize", JSON.stringify({ w: corePanel.offsetWidth }));
 }).observe(corePanel);
 
 if (recall("devpilot.coreOpen")) setCoreOpen(true, false);

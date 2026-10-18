@@ -216,3 +216,76 @@ class _AppTest:
 
         result = [event.text for event in events.since(0) if event.type == "tool_result"][0]
         assert "exit code" in result, "the command from limits.yaml was run"
+
+
+    def test_chat_request_models_preserve_message_mode_and_tags(self):
+        agent_core_request = web_app_module.AgentCoreRequest(
+            message="Explain the architecture",
+            mode="ask",
+            tags=["ask"],
+        )
+
+        project_request = web_app_module.TaskRequest(
+            message="Change the login function",
+            project_id="demo",
+            mode="change",
+            tags=["change"],
+        )
+
+        assert agent_core_request.mode == "ask"
+        assert agent_core_request.tags == ["ask"]
+
+        assert project_request.mode == "change"
+        assert project_request.tags == ["change"]
+
+    def test_task_forwards_message_mode_and_tags_to_selected_agent(self):
+        development_agent = _AgentStub()
+        registry = _ProjectRegistryStub(
+            agents={"development": development_agent}
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "development",
+                "message": "Update the login function",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert development_agent.run_called_with == "Update the login function"
+        assert development_agent.run_mode == "change"
+        assert development_agent.run_tags == ["change"]
+
+    def test_agent_core_forwards_message_mode_and_tags(self, tmp_path):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={
+                "message": "Explain the architecture",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert agent_core.run_called_with == "Explain the architecture"
+        assert agent_core.run_mode == "ask"
+        assert agent_core.run_tags == ["ask"]
+
