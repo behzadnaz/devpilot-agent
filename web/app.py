@@ -1,10 +1,9 @@
 
 import os
 import threading
-import tkinter as tk
 
 from pathlib import Path
-from tkinter import filedialog
+
 
 import ollama
 from fastapi import FastAPI, HTTPException
@@ -147,7 +146,10 @@ def build_project_registry(
 
 
 def select_folder_dialog():
-    """Open a native folder picker and return the selected directory."""
+    """Open a native folder picker when running locally."""
+    import tkinter as tk
+    from tkinter import filedialog
+
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
