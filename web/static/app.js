@@ -23,10 +23,10 @@ function loadThread(id) {
 
 const TAG_LABELS = { change: "Change code", ask: "Ask" };
 
-function saveThread(id, speaker, text, time, tags) {
+function saveThread(id, speaker, text, time, tags, basis) {
   try {
     const list = loadThread(id);
-    list.push([speaker, text, time, tags || []]);
+    list.push([speaker, text, time, tags || [], basis || null]);
     remember(threadKey(id), JSON.stringify(list.slice(-200)));
   } catch (e) {}
 }
@@ -99,13 +99,45 @@ function hideTyping(log) {
 }
 
 // persist false: restoring or a system line (not saved, no time). time: a saved timestamp.
-function appendChatMessage(log, speaker, text, persist, time, tags) {
+// Small chip showing what a reply is based on. Details are in the tooltip.
+function basisBadge(basis) {
+  const files = Array.isArray(basis.files) ? basis.files : [];
+  const list = files.join(", ");
+  const kinds = {
+    changed: ["code", "Changed code" + (files.length > 1 ? " · " + files.length + " files" : ""), files.length ? "Edited: " + list + ". Click to view the changes." : "Click to view the changes."],
+    analyzed: ["search", "Analyzed project", files.length ? "Based on: " + list : "Based on your project files."],
+    documents: ["file", "Read attached files", files.length ? "Based on: " + list : "Based on your attached files."],
+    nochange: ["check", "No changes", "Nothing in your project was edited."],
+    proposed: ["code", "Proposed code", "Code written in the chat. Nothing was applied to your files."],
+    suggestion: ["bulb", "AI suggestion", "A general answer, not checked against your files."]
+  };
+  const info = kinds[basis.kind];
+
+  if (!info) return document.createDocumentFragment();
+
+  const chip = document.createElement(basis.kind === "changed" ? "button" : "span");
+  chip.className = "basis";
+  chip.dataset.kind = basis.kind;
+  chip.title = info[2];
+  chip.setAttribute("aria-label", info[1] + ". " + info[2]);
+  chip.insertAdjacentHTML("afterbegin", icon(info[0]));
+  chip.append(info[1]);
+
+  if (basis.kind === "changed") {
+    chip.type = "button";
+    chip.addEventListener("click", () => showView("changes"));
+  }
+
+  return chip;
+}
+
+function appendChatMessage(log, speaker, text, persist, time, tags, basis) {
   const stamp = time || (persist !== false ? Date.now() : 0);
   const stick = persist === false || isNearBottom(log);
 
   if (persist !== false) {
-    if (log === agentCoreLog) saveCore(speaker, text, stamp);
-    else if (typeof projectLog !== "undefined" && log === projectLog && selectedProjectId) saveThread(selectedProjectId, speaker, text, stamp, tags);
+    if (log === agentCoreLog) saveCore(speaker, text, stamp, basis, tags);
+    else if (typeof projectLog !== "undefined" && log === projectLog && selectedProjectId) saveThread(selectedProjectId, speaker, text, stamp, tags, basis);
   }
 
   const entry = document.createElement("div");
@@ -126,12 +158,21 @@ function appendChatMessage(log, speaker, text, persist, time, tags) {
     for (const tag of tags) {
       const pill = document.createElement("span");
       pill.className = "msg-tag";
-      pill.textContent = TAG_LABELS[tag] || tag;
+      pill.dataset.tag = tag;
+      pill.title = TAG_LABELS[tag] || tag;
+      pill.insertAdjacentHTML("afterbegin", icon(tag === "change" ? "code" : "help"));
+
+      const hidden = document.createElement("span");
+      hidden.className = "sr-only";
+      hidden.textContent = TAG_LABELS[tag] || tag;
+      pill.appendChild(hidden);
       labels.appendChild(pill);
     }
 
     entry.appendChild(labels);
   }
+
+  if (basis) entry.appendChild(basisBadge(basis));
 
   entry.appendChild(content);
   log.insertBefore(entry, log.querySelector(".typing, .jump"));
@@ -209,10 +250,10 @@ function noteFail() {
   }
 }
 
-function saveCore(speaker, text, time) {
+function saveCore(speaker, text, time, basis, tags) {
   try {
     const list = JSON.parse(recall("devpilot.core") || "[]");
-    list.push([speaker, text, time]);
+    list.push([speaker, text, time, basis || null, tags || []]);
     remember("devpilot.core", JSON.stringify(list.slice(-200)));
   } catch (e) {}
 }
@@ -223,8 +264,8 @@ function restoreCore() {
     if (!list.length) return;
 
     agentCoreLog.replaceChildren();
-    for (const [speaker, text, time] of list) {
-      appendChatMessage(agentCoreLog, speaker, text, false, time);
+    for (const [speaker, text, time, basis, tags] of list) {
+      appendChatMessage(agentCoreLog, speaker, text, false, time, tags, basis);
     }
   } catch (e) {}
 }
@@ -247,7 +288,7 @@ async function pollAgentCore() {
     for (const event of (data.events || [])) {
       if (event.type === "message") {
         hideTyping(agentCoreLog);
-        appendChatMessage(agentCoreLog, "Agent Core", event.text);
+        appendChatMessage(agentCoreLog, "Agent Core", event.text, undefined, 0, undefined, event.basis);
         if (typeof onCoreMessage === "function") onCoreMessage();
         coreBusy = false;
         syncCoreSend();
@@ -309,6 +350,39 @@ async function stopAgentCore() {
   syncCoreSend();
 }
 
+let coreTags = [];
+try { coreTags = JSON.parse(recall("devpilot.coreTags") || "[]").filter(tag => tag === "ask" || tag === "change"); } catch (e) {}
+
+const CORE_PLACEHOLDER = "Ask anything, discuss the design, or drop a PDF here. Enter sends, Shift+Enter adds a line.";
+
+function paintCoreTags() {
+  for (const [id, tag] of [["coreModeChange", "change"], ["coreModeAsk", "ask"]]) {
+    const on = coreTags.includes(tag);
+    $(id).classList.toggle("on", on);
+    $(id).setAttribute("aria-pressed", String(on));
+  }
+
+  const ask = coreTags.includes("ask");
+  const change = coreTags.includes("change");
+
+  agentCoreMessage.placeholder = ask && change ? "Ask a question and request a change. Enter sends."
+    : ask ? "Ask anything. Nothing is changed. Enter sends."
+    : change ? "Describe the code change you want. Enter sends."
+    : CORE_PLACEHOLDER;
+}
+
+function toggleCoreTag(tag) {
+  coreTags = coreTags.includes(tag) ? coreTags.filter(t => t !== tag) : [...coreTags, tag];
+  remember("devpilot.coreTags", JSON.stringify(coreTags));
+  paintCoreTags();
+}
+
+const coreTagMode = () => coreTags.length === 2 ? "both" : coreTags[0] || "auto";
+
+$("coreModeChange").addEventListener("click", () => toggleCoreTag("change"));
+$("coreModeAsk").addEventListener("click", () => toggleCoreTag("ask"));
+paintCoreTags();
+
 async function sendAgentCoreMessage() {
   const text = agentCoreMessage.value.trim();
 
@@ -316,14 +390,14 @@ async function sendAgentCoreMessage() {
 
   coreBusy = true;
 
-  appendChatMessage(agentCoreLog, "You", text + (coreFiles.length ? "\n[" + coreFiles.map(f => f.name).join(", ") + "]" : ""));
+  appendChatMessage(agentCoreLog, "You", text + (coreFiles.length ? "\n[" + coreFiles.map(f => f.name).join(", ") + "]" : ""), true, 0, [...coreTags]);
   agentCoreMessage.value = "";
   showTyping(agentCoreLog);
   syncCoreSend();
   agentCoreStatus.textContent = "Sending to Agent Core...";
 
   try {
-    await postJson("/agent-core/tasks", { message: text, file_ids: coreFiles.map(f => f.id) });
+    await postJson("/agent-core/tasks", { message: text, mode: coreTagMode(), tags: coreTags, file_ids: coreFiles.map(f => f.id), file_names: coreFiles.map(f => f.name) });
     agentCoreStatus.textContent = "Agent Core is working...";
   } catch (error) {
     agentCoreStatus.textContent = error.message || "Could not start Agent Core task.";
@@ -356,7 +430,7 @@ async function startAgentCore() {
 
 
 // ---------- Top bar, icons, dialogs, theme ----------
-const ICONS = {"folderopen": "<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\"/>", "arrowright": "<path d=\"M5 12h14M13 6l6 6-6 6\"/>", "minus": "<path d=\"M5 12h14\"/>", "maximize": "<path d=\"M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3\"/>", "restore": "<rect x=\"8\" y=\"8\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M4 16V6a2 2 0 0 1 2-2h10\"/>", "columns": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M12 4v16\"/>", "rows": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M3 12h18\"/>", "layout": "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M3 9h18M9 21V9\"/>", "arrowup": "<path d=\"M12 19V5M5 12l7-7 7 7\"/>", "trash": "<path d=\"M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3\"/>", "code": "<path d=\"m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14\"/>", "clip": "<path d=\"m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7\"/>", "folder": "<path d=\"M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\"/>", "file": "<path d=\"M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z\"/><path d=\"M14 3v5h5\"/>", "plus": "<path d=\"M12 5v14M5 12h14\"/>", "info": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 11v5M12 8h.01\"/>", "help": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01\"/>", "refresh": "<path d=\"M20 11a8 8 0 0 0-14.5-4M4 4v4h4\"/><path d=\"M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4\"/>", "send": "<path d=\"M22 2 11 13M22 2l-7 20-4-9-9-4z\"/>", "stop": "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"/>", "check": "<path d=\"m5 12 5 5 9-10\"/>", "x": "<path d=\"M6 6l12 12M18 6 6 18\"/>", "arrowleft": "<path d=\"M19 12H5M11 6l-6 6 6 6\"/>", "bot": "<rect x=\"4\" y=\"8\" width=\"16\" height=\"11\" rx=\"3\"/><path d=\"M12 4v4M9 13h.01M15 13h.01M9 16.5h6\"/>", "chat": "<path d=\"M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.5A8 8 0 1 1 21 12z\"/>", "list": "<path d=\"M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01\"/>", "git": "<circle cx=\"6\" cy=\"6\" r=\"2\"/><circle cx=\"18\" cy=\"18\" r=\"2\"/><path d=\"M6 8v8a2 2 0 0 0 2 2h8\"/>", "sun": "<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4\"/>", "moon": "<path d=\"M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z\"/>", "chevron": "<path d=\"m6 9 6 6 6-6\"/>", "compass": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"m15.5 8.5-2 5-5 2 2-5z\"/>", "eye": "<path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>", "map": "<rect x=\"3\" y=\"4\" width=\"5\" height=\"16\" rx=\"1\"/><rect x=\"10\" y=\"4\" width=\"5\" height=\"10\" rx=\"1\"/><rect x=\"17\" y=\"4\" width=\"4\" height=\"13\" rx=\"1\"/>", "diagram": "<rect x=\"3\" y=\"3\" width=\"8\" height=\"6\" rx=\"1\"/><rect x=\"13\" y=\"15\" width=\"8\" height=\"6\" rx=\"1\"/><path d=\"M7 9v3h10v3\"/>", "download": "<path d=\"M12 4v11M7 10l5 5 5-5M5 20h14\"/>"};
+const ICONS = window.DEVPILOT_DATA.icons;
 
 const icon = name => '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
 
@@ -379,29 +453,20 @@ function initChrome() {
           <div class="menu-list" id="fileMenu" hidden>
             <button id="menuNew" type="button">${icon("plus")}New project</button>
             <button id="menuImport" type="button">${icon("download")}Import project</button>
-            <button id="menuRefresh" type="button">${icon("refresh")}Refresh</button>
-            <button id="menuClose" type="button">${icon("x")}Close project</button>
           </div>
         </div>
+
+        
 
         <div class="menu">
-          <button class="ghost" id="layoutBtn" type="button" aria-haspopup="true" aria-expanded="false">
-            ${icon("layout")}Layout${icon("chevron")}
+          <button class="ghost" id="helpMenuBtn" type="button" aria-haspopup="true" aria-expanded="false">
+            ${icon("help")}Help${icon("chevron")}
           </button>
-          <div class="menu-list" id="layoutMenu" hidden>
-            <button id="layoutHoriz" type="button" role="menuitemradio">${icon("columns")}Side by side</button>
-            <button id="layoutVert" type="button" role="menuitemradio">${icon("rows")}Stacked</button>
-            <hr class="menu-sep">
-            <button data-show="explorer" type="button" role="menuitemcheckbox">${icon("folder")}Explorer</button>
-            <button data-show="assistant" type="button" role="menuitemcheckbox">${icon("chat")}Assistant</button>
-            <button data-show="canvas" type="button" role="menuitemcheckbox">${icon("eye")}Canvas</button>
-            <hr class="menu-sep">
-            <button id="layoutReset" type="button">${icon("refresh")}Reset layout</button>
+          <div class="menu-list" id="helpMenu" hidden>
+            <button id="helpBtn" type="button">${icon("help")}Help topics</button>
+            <button id="aboutBtn" type="button">${icon("info")}About</button>
           </div>
         </div>
-
-        <button class="ghost" id="helpBtn" type="button">${icon("help")}Help</button>
-        <button class="ghost" id="aboutBtn" type="button">${icon("info")}About</button>
 
         <span class="grow"></span>
 
@@ -426,7 +491,7 @@ function initChrome() {
       <ul>
         <li><kbd>Enter</kbd> sends a message, <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a new line.</li>
         <li><kbd>Esc</kbd> closes menus and dialogs.</li>
-        <li>Drag a panel's title to move it, drag the dividers to change widths, drag a panel's bottom edge to change its height (side by side layout), and use the buttons in its title to maximize it, or to minimize it into the folder dock on the left (click the folder to bring it back). Double-click a divider or an edge to reset. The Layout menu switches between side by side and stacked.</li>
+        <li>Drag a panel's title to move it, drag the dividers to change widths, drag a panel's bottom edge to change its height (side by side layout), and use the buttons in its title to maximize it, or to minimize it into the folder dock on the left (click the folder to bring it back). Double-click a divider or an edge to reset.</li>
         <li>In Explorer, create or import a project, then describe what to build in Assistant.</li>
         <li>Pick one or both tags under the message box, Change code and Ask, to tell the AI what you want. They are sent with your message. With no tag, the AI decides.</li>
         <li>Click the robot icon at the top right, next to the light and dark theme button, to open Agent Core: general questions, developing DevPilot, and reading your PDFs. It keeps its own history.</li>
@@ -440,16 +505,24 @@ function initChrome() {
   const fileMenu = $("fileMenu");
   const setMenu = open => { fileMenu.hidden = !open; fileBtn.setAttribute("aria-expanded", String(open)); };
 
-  fileBtn.addEventListener("click", event => { event.stopPropagation(); setMenu(fileMenu.hidden); });
+  fileBtn.addEventListener("click", event => { event.stopPropagation(); setHelpMenu(false); setMenu(fileMenu.hidden); });
   document.addEventListener("click", () => setMenu(false));
   document.addEventListener("keydown", event => { if (event.key === "Escape") setMenu(false); });
+
+  const helpMenuBtn = $("helpMenuBtn");
+  const helpMenu = $("helpMenu");
+  const setHelpMenu = open => { helpMenu.hidden = !open; helpMenuBtn.setAttribute("aria-expanded", String(open)); };
+
+  helpMenuBtn.addEventListener("click", event => { event.stopPropagation(); setMenu(false); setHelpMenu(helpMenu.hidden); });
+  document.addEventListener("click", () => setHelpMenu(false));
+  document.addEventListener("keydown", event => { if (event.key === "Escape") setHelpMenu(false); });
 
   for (const [button, dialog] of [["aboutBtn", "aboutDialog"], ["helpBtn", "helpDialog"]]) {
     $(button).addEventListener("click", () => $(dialog).showModal());
   }
 
   document.querySelectorAll("dialog").forEach(dialog => {
-    dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
+    dialog.addEventListener("click", event => { if (event.target === dialog && dialog.id !== "projectDialog") dialog.close(); });
     dialog.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => dialog.close()));
   });
 
@@ -510,8 +583,6 @@ const dialogTitle = $("dialogTitle");
 const dialogNameInput = $("dialogNameInput");
 const idPreview = $("idPreview");
 const languageBlock = $("languageBlock");
-const languageList = $("languageList");
-const languageStatus = $("languageStatus");
 const projectPath = $("projectPath");
 const dialogStatus = $("dialogStatus");
 const dialogCreate = $("dialogCreate");
@@ -578,7 +649,7 @@ function renderPreview(output) {
   const has = !!(output && output.html);
   previewEmpty.hidden = has;
   previewFrame.hidden = !has;
-  previewTitle.textContent = has ? (output.title || "") : "";
+  previewTitle.textContent = has ? selectedProjectId + " / " + (output.title || "") : "";
   if (has) previewFrame.srcdoc = output.html;
 }
 
@@ -586,6 +657,10 @@ function renderStoryMap(output) {
   storyMap.replaceChildren();
   const columns = (output && output.columns) || [];
   storyEmpty.hidden = columns.length > 0;
+
+  const allStories = columns.flatMap(c => c.stories || []);
+  const doneStories = allStories.filter(s => s.status === "done").length;
+  $("storySummary").textContent = allStories.length ? selectedProjectId + ": " + doneStories + " of " + allStories.length + " stories done" : "";
 
   for (const column of columns) {
     const col = document.createElement("div");
@@ -630,9 +705,10 @@ async function loadOutputs(mode) {
   if (!selectedProjectId) return;
 
   try {
+    const requested = selectedProjectId;
     const response = await fetch("/outputs?project_id=" + encodeURIComponent(selectedProjectId));
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) return;
+    if (!response.ok || requested !== selectedProjectId) return;
 
     for (const view of Object.keys(RENDERERS)) applyOutput(view, data[view], mode);
   } catch (error) {
@@ -724,7 +800,32 @@ async function loadTree() {
   }
 }
 
-$("refreshTree").addEventListener("click", loadTree);
+// Refresh button for one section: spins while loading, then confirms with "Updated <time>".
+async function refreshWith(button, statusEl, task, label) {
+  if (button.disabled) return;
+
+  button.disabled = true;
+  button.classList.add("spinning");
+  statusEl.textContent = "Refreshing " + label + "...";
+
+  const started = Date.now();
+
+  try { await task(); } catch (e) {}
+
+  const wait = 600 - (Date.now() - started);
+  if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+
+  button.classList.remove("spinning");
+  button.disabled = false;
+
+  if (statusEl.textContent === "Refreshing " + label + "..." || statusEl.textContent === "") {
+    const note = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    statusEl.textContent = note;
+    setTimeout(() => { if (statusEl.textContent === note) statusEl.textContent = ""; }, 3000);
+  }
+}
+
+$("refreshTree").addEventListener("click", event => refreshWith(event.currentTarget, treeStatus, async () => { await loadTree(); await loadOutputs("quiet"); }, "files"));
 
 // Shows a project file in the Preview view: HTML runs, anything else is shown as text.
 async function openFile(path) {
@@ -781,14 +882,22 @@ async function loadProjects() {
   }
 }
 
-$("refreshProjects").addEventListener("click", loadProjects);
+$("refreshProjects").addEventListener("click", event => refreshWith(event.currentTarget, listStatus, loadProjects, "projects"));
 
 function setChatEnabled() {
   projectMessage.placeholder = currentPlaceholder();
+
+  const badge = $("projectBadge");
+  badge.textContent = selectedProjectId ? "Changes only in: " + selectedProjectId : "No project selected";
+  badge.title = selectedProjectId ? "Project AI reads and edits files in " + selectedProjectId + " only." : "";
+  badge.classList.toggle("none", !selectedProjectId);
 }
 
 async function selectProject(id) {
-  if (running && id !== selectedProjectId && !confirm("A task is still running. Switch project anyway?")) return;
+  if (running && id !== selectedProjectId) {
+    if (!confirm('A task is still running in "' + selectedProjectId + '". Stop it and switch to "' + id + '"?')) return;
+    try { await postJson("/tasks/stop", { project_id: selectedProjectId }); } catch (e) {}
+  }
 
   selectedProjectId = id;
   remember("devpilot.project", id);
@@ -812,9 +921,9 @@ async function selectProject(id) {
   const saved = loadThread(id);
 
   if (saved.length) {
-    for (const [who, message, time, tags] of saved) appendChatMessage(projectLog, who, message, false, time, tags);
+    for (const [who, message, time, tags, basis] of saved) appendChatMessage(projectLog, who, message, false, time, tags, basis);
   } else {
-    appendChatMessage(projectLog, "Project AI", "Ready to work on " + id + ".", false);
+    appendChatMessage(projectLog, "Project AI", "Ready. Everything you ask here applies only to " + id + ".", false);
   }
   projectChatStatus.textContent = "";
 
@@ -843,7 +952,29 @@ function closeProject() {
 }
 
 // ----- create / import dialog -----
+function importSource() {
+  const radio = document.querySelector('input[name="source"]:checked');
+  return radio ? radio.value : "folder";
+}
+
+const lastPart = text => String(text).trim().replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() || "";
+
+// The project id comes from the chosen folder name, or from the repository name.
+function importId() {
+  const raw = importSource() === "github" ? lastPart($("githubUrl").value).replace(/\.git$/i, "") : lastPart(projectPath.value);
+  return slugify(raw);
+}
+
 function updateIdPreview() {
+  if (dialogMode === "import") {
+    const importId_ = importId();
+    const taken = knownProjects.has(importId_);
+
+    $("importPreview").textContent = !importId_ ? "" : taken ? 'A project "' + importId_ + '" already exists.' : "Will be imported as: " + importId_;
+    dialogCreate.disabled = !!importId_ && taken;
+    return;
+  }
+
   const raw = dialogNameInput.value.trim();
   const id = slugify(raw);
   const taken = knownProjects.has(id);
@@ -857,94 +988,233 @@ function updateIdPreview() {
 }
 
 dialogNameInput.addEventListener("input", updateIdPreview);
+projectPath.addEventListener("input", updateIdPreview);
+$("githubUrl").addEventListener("input", updateIdPreview);
+
+document.querySelectorAll('input[name="source"]').forEach(radio => radio.addEventListener("change", () => {
+  const github = importSource() === "github";
+  $("githubBlock").hidden = !github;
+  $("pathLabel").hidden = github;
+  projectPath.parentElement.hidden = github;
+  updateIdPreview();
+}));
 
 async function openProjectDialog(mode) {
   dialogMode = mode;
   dialogTitle.innerHTML = icon(mode === "create" ? "plus" : "download") + (mode === "create" ? "New project" : "Import project");
   dialogCreate.lastChild.textContent = mode === "create" ? "Create" : "Import";
   languageBlock.hidden = mode !== "create";
+  $("nameBlock").hidden = mode !== "create";
+  $("sourceBlock").hidden = mode === "create";
+  $("githubBlock").hidden = true;
+  $("githubUrl").value = "";
+  $("importPreview").textContent = "";
+  $("pathLabel").hidden = false;
+  projectPath.parentElement.hidden = false;
+  $("pathLabel").textContent = "Project folder";
+  projectPath.placeholder = "Choose a project folder";
+  document.querySelector('input[name="source"][value="folder"]').checked = true;
   dialogNameInput.value = "";
   idPreview.textContent = "";
   dialogStatus.textContent = "";
   dialogCreate.disabled = false;
   projectPath.value = mode === "create" ? recall("devpilot.folder") : "";
-  languageList.replaceChildren();
+  $("stackInput").value = "";
+  $("stackCheck").hidden = true;
+  $("stackGuide").hidden = true;
+  $("stackGoal").value = "";
+  $("stackGuideStatus").textContent = "";
+  $("stackSuggestions").replaceChildren();
+  stackCheckToken++;
   projectDialog.showModal();
   dialogNameInput.focus();
 
   if (mode !== "create") return;
 
-  languageStatus.textContent = "Detecting installed languages...";
+  await loadStacks();
+}
+
+let stackCheckToken = 0;
+let stackTimer = 0;
+
+async function loadStacks() {
+  if (projectPath.value) return;
 
   try {
     const response = await fetch("/languages");
     const data = await response.json().catch(() => ({}));
+    if (response.ok && data.default_folder && !projectPath.value) projectPath.value = data.default_folder;
+  } catch (e) {}
+}
 
-    if (!response.ok) throw new Error(data.detail || "Could not detect installed languages.");
+// The user types the stack (or picks one the AI suggests).
+function chosenStack() {
+  const name = $("stackInput").value.trim();
+  return name ? { id: name.toLowerCase(), name } : null;
+}
 
-    if (!projectPath.value && data.default_folder) projectPath.value = data.default_folder;
+$("stackInput").addEventListener("input", () => {
+  clearTimeout(stackTimer);
+  stackCheckToken++;
 
-    const list = data.languages || [];
-    languageStatus.textContent = list.length
-      ? "Installed on this computer:"
-      : "No supported languages were detected on this computer.";
+  if (!$("stackInput").value.trim()) { $("stackCheck").hidden = true; return; }
+  stackTimer = setTimeout(checkStack, 600);
+});
 
-    list.forEach((lang, index) => {
-      const label = document.createElement("label");
-      label.className = "lang";
+// Asks the backend whether the typed stack's runtime is installed, and which version.
+async function checkStack() {
+  const box = $("stackCheck");
+  const stack = chosenStack();
+  const token = ++stackCheckToken;
 
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = "language";
-      radio.value = lang.id;
-      radio.checked = index === 0;
+  box.replaceChildren();
+
+  if (!stack) { box.hidden = true; return; }
+
+  box.hidden = false;
+  box.textContent = "Checking " + stack.name + " on this computer...";
+
+  let result = {};
+  let failure = "";
+
+  try {
+    const response = await fetch("/languages/check?stack=" + encodeURIComponent(stack.name));
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) throw new Error(data.detail || "Could not check this computer.");
+    result = data;
+  } catch (error) {
+    failure = error.message || "Could not check this computer.";
+  }
+
+  if (token !== stackCheckToken) return;
+
+  box.replaceChildren();
+
+  const runtime = result.runtime || stack.name;
+  const text = failure
+    ? failure
+    : result.no_install
+      ? "Nothing to install for " + stack.name + "."
+      : result.installed
+        ? runtime + " is installed. Version " + (result.version || "unknown") + "."
+        : runtime + " is not installed on this computer. You can still create the project and install it later to run tests and the preview.";
+
+  box.append(text + " ");
+
+  if (!failure && !result.installed && !result.no_install && result.url) {
+    const download = document.createElement("a");
+    download.href = result.url;
+    download.target = "_blank";
+    download.rel = "noopener noreferrer";
+    download.textContent = "Download";
+    box.append(download, " · ");
+  }
+
+  const recheck = document.createElement("a");
+  recheck.href = "#";
+  recheck.textContent = "Re-check installed";
+  recheck.addEventListener("click", event => { event.preventDefault(); checkStack(); });
+  box.appendChild(recheck);
+}
+
+// "Not sure?": the user describes the goal and the AI suggests stacks.
+$("askStack").addEventListener("click", event => {
+  event.preventDefault();
+  const guide = $("stackGuide");
+  guide.hidden = !guide.hidden;
+  if (!guide.hidden) $("stackGoal").focus();
+});
+
+async function suggestStacks() {
+  const description = $("stackGoal").value.trim();
+  const status = $("stackGuideStatus");
+  const list = $("stackSuggestions");
+
+  list.replaceChildren();
+
+  if (!description) { status.textContent = "Describe what you want to build in one sentence."; return; }
+
+  status.textContent = "Thinking...";
+  $("stackSuggest").disabled = true;
+
+  try {
+    const data = await postJson("/stack-advice", { description });
+    const suggestions = data.suggestions || [];
+
+    status.textContent = suggestions.length ? "Pick one to use it:" : "No suggestion yet. Try describing it differently, or type a stack above.";
+
+    suggestions.forEach(item => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "lang";
 
       const title = document.createElement("span");
-      title.textContent = lang.name;
+      title.textContent = item.stack;
 
-      const version = document.createElement("small");
-      version.textContent = lang.version || "";
+      const reason = document.createElement("small");
+      reason.textContent = item.reason || "";
 
-      label.append(radio, title, version);
-      languageList.appendChild(label);
+      button.append(title, reason);
+      button.addEventListener("click", () => {
+        $("stackInput").value = item.stack;
+        $("stackGuide").hidden = true;
+        checkStack();
+      });
+      list.appendChild(button);
     });
   } catch (error) {
-    languageStatus.textContent = error.message || "Could not detect installed languages.";
+    status.textContent = error.message || "Could not get a suggestion. You can still type a stack above.";
+  } finally {
+    $("stackSuggest").disabled = false;
   }
 }
+
+$("stackSuggest").addEventListener("click", suggestStacks);
+$("stackGoal").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); suggestStacks(); } });
 
 $("newProject").addEventListener("click", () => openProjectDialog("create"));
 $("importProject").addEventListener("click", () => openProjectDialog("import"));
 $("dialogCancel").addEventListener("click", () => projectDialog.close());
+$("dialogClose").addEventListener("click", () => projectDialog.close());
 
 $("browseProject").addEventListener("click", async () => {
   await chooseFolder(projectPath, dialogStatus);
 
-  if (dialogMode === "import" && !dialogNameInput.value.trim() && projectPath.value) {
-    dialogNameInput.value = projectPath.value.split(/[\\/]/).filter(Boolean).pop() || "";
-    updateIdPreview();
-  }
+  updateIdPreview();
 });
 
 dialogCreate.addEventListener("click", async () => {
-  const name = dialogNameInput.value.trim();
+  const name = dialogMode === "import" ? importId() : dialogNameInput.value.trim();
   const id = slugify(name);
   const path = projectPath.value.trim();
 
-  if (!name || !id) { dialogStatus.textContent = "Enter a project name with letters or numbers."; return; }
+  if (!name || !id) { dialogStatus.textContent = dialogMode === "import" ? (importSource() === "github" ? "Enter a GitHub repository URL." : "Choose a project folder.") : "Enter a project name with letters or numbers."; return; }
   if (knownProjects.has(id)) { dialogStatus.textContent = 'A project "' + id + '" already exists.'; return; }
-  if (!path) { dialogStatus.textContent = "Choose a project folder."; return; }
+  if (!path && !(dialogMode === "import" && importSource() === "github")) { dialogStatus.textContent = "Choose a project folder."; return; }
+
+  if (dialogMode === "import" && importSource() === "github") {
+    let validUrl = false;
+    try {
+      const link = new URL($("githubUrl").value.trim());
+      validUrl = link.hostname === "github.com" && link.pathname.split("/").filter(Boolean).length >= 2;
+    } catch (e) {}
+
+    if (!validUrl) { dialogStatus.textContent = "Enter a GitHub repository URL, like https://github.com/owner/repo."; return; }
+  }
+
+  if (dialogMode === "create" && !chosenStack()) { dialogStatus.textContent = "Type your stack, or ask AI to guide you."; return; }
 
   dialogCreate.disabled = true;
   dialogStatus.textContent = dialogMode === "create" ? "Creating project..." : "Importing project...";
 
   try {
     if (dialogMode === "create") {
-      const chosen = languageList.querySelector("input:checked");
-      await postJson("/projects", { id, path, language: chosen ? chosen.value : "", workflow: "software_development" });
+      const stack = chosenStack();
+      await postJson("/projects", { id, path, stack: stack.name, workflow: "software_development" });
       remember("devpilot.folder", path);
     } else {
-      await postJson("/projects/import", { id, path, workflow: "software_development" });
+      await postJson("/projects/import", { id, path: importSource() === "github" ? "" : path, workflow: "software_development", source: importSource(), url: importSource() === "github" ? $("githubUrl").value.trim() : "" });
     }
 
     projectDialog.close();
@@ -958,8 +1228,6 @@ dialogCreate.addEventListener("click", async () => {
 
 $("menuNew").addEventListener("click", () => openProjectDialog("create"));
 $("menuImport").addEventListener("click", () => openProjectDialog("import"));
-$("menuClose").addEventListener("click", closeProject);
-$("menuRefresh").addEventListener("click", () => { loadProjects(); loadTree(); loadOutputs("quiet"); });
 
 // ----- tasks -----
 function renderDiff(text) {
@@ -1012,7 +1280,7 @@ function renderDiff(text) {
     changedFiles = new Set(files.map(f => f.name));
     acceptChanges.disabled = false;
     reviewBar.hidden = false;
-    reviewSummary.textContent = files.length + (files.length === 1 ? " file changed" : " files changed");
+    reviewSummary.textContent = files.length + (files.length === 1 ? " file changed" : " files changed") + " in " + selectedProjectId;
     markUpdated("changes");
     rejectChanges.disabled = false;
   }
@@ -1025,14 +1293,14 @@ function showProjectEvent(event) {
     changesEmpty.hidden = true;
     renderDiff(event.text);
   } else if (event.type === "message") {
-    appendChatMessage(projectLog, "Project AI", event.text);
+    appendChatMessage(projectLog, "Project AI", event.text, undefined, 0, undefined, event.basis);
     projectChatStatus.textContent = "Response received.";
     setRunning(false);
     loadTree();
     loadOutputs("switch");
     projectMessage.focus();
   } else if (event.type === "output") {
-    loadOutputs("switch");
+    loadOutputs();
   } else if (event.type === "error") {
     statusLine.textContent = event.text || "The task failed.";
     projectChatStatus.textContent = event.text || "The task failed.";
@@ -1040,6 +1308,7 @@ function showProjectEvent(event) {
     retryTask.hidden = false;
   } else {
     addStep(event);
+    if (event.type === "tool_result" && /^(Edited|Created|Wrote|Deleted)/.test(event.text || "")) { loadTree(); loadOutputs(); }
   }
 }
 
@@ -1126,7 +1395,7 @@ function addStep(event) {
   });
 
   async function decideChanges(kind) {
-    if (kind === "reject" && !confirm("Discard all changes from this task?")) return;
+    if (kind === "reject" && !confirm('Discard all changes from this task in "' + selectedProjectId + '"?')) return;
 
     acceptChanges.disabled = true;
     rejectChanges.disabled = true;
@@ -1136,6 +1405,8 @@ function addStep(event) {
       await postJson("/tasks/" + kind, { project_id: selectedProjectId });
       reviewBar.hidden = true;
       changedFiles = new Set();
+      if (kind === "reject") { diff.replaceChildren(); changesEmpty.hidden = false; }
+      loadOutputs("switch");
       loadTree();
       changesStatus.textContent =
         kind === "accept" ? "Changes accepted." : "Changes discarded and files restored.";
@@ -1230,12 +1501,13 @@ function currentPlaceholder() {
   if (!selectedProjectId) return NO_PROJECT_HINT;
 
   const ask = chatTags.includes("ask");
+  const scope = " Changes apply only to " + selectedProjectId + ".";
   const change = chatTags.includes("change");
 
-  if (ask && change) return "Ask a question and request a change. Enter sends.";
-  if (ask) return "Ask about this project. Nothing is changed. Enter sends.";
-  if (change) return "Describe the change you want. Enter sends.";
-  return "Ask or describe a change. Pick a tag below if you like. Enter sends.";
+  if (ask && change) return "Ask a question and request a change." + scope;
+  if (ask) return "Ask about " + selectedProjectId + ". Nothing is changed.";
+  if (change) return "Describe the change you want." + scope;
+  return "Ask or describe a change." + scope;
 }
 
 function paintTags() {
@@ -1346,7 +1618,7 @@ $("clearChat").addEventListener("click", () => {
 
   projectLog.replaceChildren();
   remember(threadKey(selectedProjectId), "[]");
-  appendChatMessage(projectLog, "Project AI", "Ready to work on " + selectedProjectId + ".", false);
+  appendChatMessage(projectLog, "Project AI", "Ready. Everything you ask here applies only to " + selectedProjectId + ".", false);
 });
 
 // ----- Agent Core: the robot icon at the top right opens it as a floating chat -----
@@ -1510,9 +1782,6 @@ function applyLayout() {
 
   dock.hidden = !dock.children.length;
 
-  $("layoutHoriz").setAttribute("aria-checked", String(horizontal));
-  $("layoutVert").setAttribute("aria-checked", String(!horizontal));
-  document.querySelectorAll("[data-show]").forEach(button => button.setAttribute("aria-checked", String(!isMin(button.dataset.show))));
 }
 
 const changeLayout = change => { change(); applyLayout(); saveLayout(); };
@@ -1707,20 +1976,8 @@ splitters.forEach((splitter, index) => {
   });
 });
 
-// Layout menu
-const layoutBtn = $("layoutBtn");
-const layoutMenu = $("layoutMenu");
-const setLayoutMenu = open => { layoutMenu.hidden = !open; layoutBtn.setAttribute("aria-expanded", String(open)); };
 
-layoutBtn.addEventListener("click", event => { event.stopPropagation(); setLayoutMenu(layoutMenu.hidden); });
-$("fileMenuBtn").addEventListener("click", () => setLayoutMenu(false));
-document.addEventListener("click", () => setLayoutMenu(false));
-document.addEventListener("keydown", event => { if (event.key === "Escape") setLayoutMenu(false); });
 
-$("layoutHoriz").addEventListener("click", () => changeLayout(() => { layoutState.orientation = "horizontal"; }));
-$("layoutVert").addEventListener("click", () => changeLayout(() => { layoutState.orientation = "vertical"; }));
-$("layoutReset").addEventListener("click", () => changeLayout(() => { layoutState = cloneLayout(DEFAULT_LAYOUT); }));
-document.querySelectorAll("[data-show]").forEach(button => button.addEventListener("click", () => toggleMinimized(button.dataset.show)));
 
 applyLayout();
 
