@@ -483,3 +483,6 @@ app = create_app(
     projects_root=PROJECTS_ROOT,
     approval_manager=approval_manager,
 )
+
+# Vercel entrypoint
+application = app
