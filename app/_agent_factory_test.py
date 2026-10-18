@@ -83,3 +83,21 @@ class _AgentFactoryTest:
 
         results = [event.text for event in events.since(0) if event.type == "tool_result"]
         assert "exit code: 0" in results[0], "the command from the allowlist ran"
+
+    def test_factory_passes_approval_callback_to_tools(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+
+        factory = AgentFactory(
+            llm=_LLMStub([final_message("Done.")]),
+            tool_schemas=ToolSchemas.load(TOOLS_FILE),
+            system_prompt="Test agent",
+            approval=lambda action, details: False,
+        )
+
+        agent = factory("selected", {"path": project})
+
+        result = agent._tools.create_file("blocked.txt", "content")
+
+        assert "approval denied" in result.lower()
+        assert not (project / "blocked.txt").exists()

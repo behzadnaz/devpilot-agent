@@ -1,3 +1,4 @@
+
 from app.agent_loop import AgentLoop
 from app.reply_parser import ReplyParser
 from app.tools import ToolSet
@@ -13,15 +14,21 @@ class AgentFactory:
         system_prompt,
         max_steps=20,
         limits=None,
+        approval=None,
     ):
         self._llm = llm
         self._tool_schemas = tool_schemas
         self._system_prompt = system_prompt
         self._max_steps = max_steps
         self._limits = limits
+        self._approval = approval
 
     def __call__(self, project_id, config):
-        tools = ToolSet(project_folder=config["path"], limits=self._limits)
+        tools = ToolSet(
+            project_folder=config["path"],
+            limits=self._limits,
+            approval=self._approval,
+        )
         parser = ReplyParser(
             self._tool_schemas.required_arguments()
         )

@@ -191,3 +191,18 @@ class _ToolSetTest:
 
         assert "longer than" in result, "the reason"
         assert "stopped" in result, "it was stopped"
+
+
+    def test_create_file_is_blocked_when_approval_is_denied(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+
+        tools = ToolSet(
+            project,
+            approval=lambda action, details: False,
+        )
+
+        result = tools.create_file("hello.py", "print('hello')")
+
+        assert "approval" in result.lower()
+        assert not (project / "hello.py").exists()
