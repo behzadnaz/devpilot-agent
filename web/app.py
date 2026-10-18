@@ -8,6 +8,7 @@ from pathlib import Path
 import ollama
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agent_factory import AgentFactory
@@ -174,6 +175,13 @@ def create_app(
 ):
     """Create the FastAPI application and register its routes."""
     web_app = FastAPI()
+
+    static_dir = Path(__file__).parent / "static"
+    web_app.mount(
+        "/static",
+        StaticFiles(directory=static_dir),
+        name="static",
+    )
 
     # Use the supplied manager when available so the API can resolve
     # approval requests created by the agent.
