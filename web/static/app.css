@@ -376,6 +376,41 @@ h2 .icon, h3 .icon { margin-right: 8px; }
 .brand { display: inline-flex; align-items: center; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; color: var(--text); text-decoration: none; margin-right: 14px !important; }
 .brand .icon { width: 1.4em; height: 1.4em; }
 
+
+/* ---- top bar ---- */
+.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); }
+.topbar-in { display: flex; align-items: center; gap: 6px; max-width: 1240px; margin: 0 auto; padding: 8px 20px; }
+.topbar button, .topbar a { margin: 0; }
+
+.brand { display: inline-flex; align-items: center; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; color: var(--text); text-decoration: none; margin-right: 14px !important; }
+.brand .icon { width: 1.4em; height: 1.4em; }
+
+.brand-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  flex-shrink: 0;
+  margin-right: 6px;
+
+}
+
+.topbar .ghost, .menu-list a, .menu-list button {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: auto;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  text-decoration: none;
+  cursor: pointer;
+}
+
 .topbar .ghost, .menu-list a, .menu-list button {
   display: flex;
   align-items: center;
@@ -935,3 +970,4 @@ aside.core-panel .core-head { background: var(--core-head); }
 .tagbar .tag:hover:not(.on) { color: var(--text); border-color: var(--tc); }
 .tagbar .tag.on { background: var(--tc); border-color: var(--tc); color: var(--on-accent); box-shadow: none; font-weight: 700; }
 .tagbar .tag.on .icon { opacity: 1; }
+

@@ -459,7 +459,10 @@ function initChrome() {
 
     <header class="topbar">
       <div class="topbar-in">
-        <span class="brand">${icon("compass")}DevPilot</span>
+        <span class="brand">
+          <img src="/static/resources/robot.png" alt="DevPilot robot" class="brand-icon">
+            DevPilot
+        </span>
 
         <div class="menu">
           <button class="ghost" id="fileMenuBtn" type="button" aria-haspopup="true" aria-expanded="false">
@@ -911,17 +914,77 @@ async function loadProjects() {
     knownProjects = new Set(projects.map(p => p.id));
     projectList.replaceChildren();
 
-    for (const project of projects) {
-      const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.id = project.id;
-      button.className = project.id === selectedProjectId ? "active" : "";
-      button.innerHTML = icon("folder");
-      button.append(project.id);
-      button.addEventListener("click", () => selectProject(project.id));
-      item.appendChild(button);
-      projectList.appendChild(item);
+for (const project of projects) {
+  const item = document.createElement("li");
+
+  // Open project button
+  const openButton = document.createElement("button");
+  openButton.type = "button";
+  openButton.dataset.id = project.id;
+  openButton.className =
+    project.id === selectedProjectId ? "active" : "";
+  openButton.innerHTML = icon("folder");
+  openButton.append(project.id);
+  openButton.addEventListener("click", () => selectProject(project.id));
+
+  // Delete project button
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.textContent = "Delete";
+  deleteButton.className = "delete-project";
+  deleteButton.title = "Move " + project.id + " to the Recycle Bin";
+
+  deleteButton.addEventListener("click", async (event) => {
+    event.stopPropagation();
+
+    if (!confirm('Move project "' + project.id + '" to the Recycle Bin?')) {
+      return;
+    }
+
+    deleteButton.disabled = true;
+    listStatus.textContent = "Moving project to the Recycle Bin...";
+
+    try {
+      const response = await fetch(
+        "/projects/" + encodeURIComponent(project.id),
+        { method: "DELETE" }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not delete the project.");
+      }
+
+      if (selectedProjectId === project.id) {
+        selectedProjectId = "";
+        remember("devpilot.project", "");
+        clearChat();
+      }
+
+      await loadProjects();
+      listStatus.textContent = "Project moved to the Recycle Bin.";
+    } catch (error) {
+      listStatus.textContent =
+        error.message || "Could not delete the project.";
+      deleteButton.disabled = false;
+    }
+  });
+
+  item.append(openButton, deleteButton);
+  projectList.appendChild(item);
+}
+catch (error) {
+      listStatus.textContent =
+        error.message || "Could not delete the project.";
+      deleteButton.disabled = false;
+    }
+  });
+
+  item.append(openButton, deleteButton);
+  projectList.appendChild(item);
+}
+
     }
 
     listStatus.textContent = projects.length ? "" : "No projects yet. Create or import one.";
@@ -1174,6 +1237,29 @@ $("askStack").addEventListener("click", event => {
   if (!guide.hidden) $("stackGoal").focus();
 });
 
+// Quick suggestions, used when the AI backend cannot answer.
+function localStackAdvice(text) {
+  const t = String(text).toLowerCase();
+
+  if (/api|backend|server|database|service/.test(t)) return [
+    { stack: "Python + FastAPI", reason: "Quick to build, easy to read" },
+    { stack: "Node.js + Express", reason: "Same language as the web front end" },
+    { stack: "Java + Spring Boot", reason: "Solid for large business systems" }
+  ];
+
+  if (/web|site|page|app|booking|shop|store/.test(t)) return [
+    { stack: "React + Node.js", reason: "Rich, interactive web apps" },
+    { stack: "Static HTML, CSS, JS", reason: "Simple pages, nothing to install" },
+    { stack: "Python + Flask", reason: "Small sites with a simple server" }
+  ];
+
+  return [
+    { stack: "Python", reason: "Good all-round start" },
+    { stack: "JavaScript (Node.js)", reason: "Works for web and tools" },
+    { stack: "Static HTML, CSS, JS", reason: "Simplest, nothing to install" }
+  ];
+}
+
 async function suggestStacks() {
   const description = $("stackGoal").value.trim();
   const status = $("stackGuideStatus");
@@ -1186,36 +1272,44 @@ async function suggestStacks() {
   status.textContent = "Thinking...";
   $("stackSuggest").disabled = true;
 
+  let suggestions = [];
+  let note = "Pick one to use it:";
+
   try {
     const data = await postJson("/stack-advice", { description });
-    const suggestions = data.suggestions || [];
+    suggestions = data.suggestions || [];
+  } catch (error) {}
 
-    status.textContent = suggestions.length ? "Pick one to use it:" : "No suggestion yet. Try describing it differently, or type a stack above.";
-
-    suggestions.forEach(item => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "lang";
-
-      const title = document.createElement("span");
-      title.textContent = item.stack;
-
-      const reason = document.createElement("small");
-      reason.textContent = item.reason || "";
-
-      button.append(title, reason);
-      button.addEventListener("click", () => {
-        $("stackInput").value = item.stack;
-        $("stackGuide").hidden = true;
-        checkStack();
-      });
-      list.appendChild(button);
-    });
-  } catch (error) {
-    status.textContent = error.message || "Could not get a suggestion. You can still type a stack above.";
-  } finally {
-    $("stackSuggest").disabled = false;
+  // Always show something, even if the AI could not answer.
+  if (!suggestions.length) {
+    suggestions = localStackAdvice(description);
+    note = "Quick suggestions (the AI could not answer right now). Pick one to use it:";
   }
+
+  status.textContent = note;
+
+  suggestions.forEach(item => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "lang";
+
+    const title = document.createElement("span");
+    title.textContent = item.stack;
+
+    const reason = document.createElement("small");
+    reason.textContent = item.reason || "";
+
+    button.append(title, reason);
+    button.addEventListener("click", () => {
+      $("stackInput").value = item.stack;
+      $("stackGuide").hidden = true;
+      checkStack();
+    });
+    list.appendChild(button);
+  });
+
+  $("stackSuggest").disabled = false;
+  list.scrollIntoView({ block: "nearest" });
 }
 
 $("stackSuggest").addEventListener("click", suggestStacks);

@@ -1,3 +1,4 @@
+
 import inspect
 import os
 import threading
@@ -8,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from send2trash import send2trash
 
 from app.agent_factory import AgentFactory
 from app.approval import ApprovalManager
@@ -37,7 +39,7 @@ PROJECTS_ROOT = Path(
         "DEVPILOT_PROJECTS_ROOT",
         str(Path.home() / "DevPilot-Workspace"),
     )
-).resolve()
+).expanduser().resolve()
 
 
 # ---------------------------------------------------------
@@ -107,25 +109,37 @@ def _in_background(job):
     threading.Thread(target=job, daemon=True).start()
 
 
-def _run_agent(agent_instance, message, events, mode="ask", tags=None):
-    """Pass optional arguments only when the agent supports them."""
-    run_method = agent_instance.run
-    parameters = inspect.signature(run_method).parameters
+def _run_agent_safely(
+    agent_instance,
+    message,
+    events,
+    mode="ask",
+    tags=None,
+):
+    """Run an agent and publish an error if the task crashes."""
+    try:
+        run_method = agent_instance.run
+        parameters = inspect.signature(run_method).parameters
 
-    accepts_extra_keywords = any(
-        parameter.kind == inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
-    )
+        accepts_extra_keywords = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
 
-    kwargs = {}
+        kwargs = {}
 
-    if "mode" in parameters or accepts_extra_keywords:
-        kwargs["mode"] = mode
+        if "mode" in parameters or accepts_extra_keywords:
+            kwargs["mode"] = mode
 
-    if "tags" in parameters or accepts_extra_keywords:
-        kwargs["tags"] = tags or []
+        if "tags" in parameters or accepts_extra_keywords:
+            kwargs["tags"] = tags or []
 
-    run_method(message, events, **kwargs)
+        run_method(message, events, **kwargs)
+
+    except Exception as exc:
+        events.publish("status", "failed")
+        events.publish("message", f"Agent failed: {exc}")
+
 
 def _safe_project_path(project_registry, project_id):
     """Return a registered project's resolved directory."""
@@ -143,7 +157,7 @@ def _safe_project_path(project_registry, project_id):
             detail="Project not found.",
         ) from None
 
-    if "path" not in config:
+    if not config.get("path"):
         raise HTTPException(
             status_code=400,
             detail="Project has no configured path.",
@@ -164,6 +178,7 @@ def _resolve_project_file(project_root, relative_path):
         )
 
     return requested
+
 
 # ---------------------------------------------------------
 # Configuration factories
@@ -276,13 +291,16 @@ def create_app(
                 detail="Workspace root is not configured.",
             )
 
-        root = Path(projects_root).resolve()
+        root = Path(projects_root).expanduser().resolve()
         requested = Path(request.path).expanduser().resolve()
 
         if requested != root:
             raise HTTPException(
                 status_code=400,
-                detail="Workspace path must match the configured workspace root.",
+                detail=(
+                    "Workspace path must match the configured "
+                    "workspace root."
+                ),
             )
 
         try:
@@ -355,16 +373,21 @@ def create_app(
                 detail="Project ID, path, and workflow are required.",
             )
 
+        existing_projects = project_registry.list_projects()
+
+        if project_id in existing_projects:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Project already exists: {project_id}",
+            )
+
         requested_path = Path(raw_path).expanduser().resolve()
 
-        if projects_root is not None:
-            root = Path(projects_root).resolve()
-
-            if not requested_path.is_relative_to(root):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Project path must be inside the approved workspace.",
-                )
+        if not requested_path.exists() or not requested_path.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail="Project path must be an existing directory.",
+            )
 
         try:
             project_registry.add_project(
@@ -385,8 +408,69 @@ def create_app(
             "workflow": workflow,
         }
 
+    @web_app.delete("/projects/{project_id}")
+    def delete_project(project_id: str):
+        """Move a registered project to the Recycle Bin."""
+        if project_registry is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Project registry is not configured.",
+            )
+
+        project_path = _safe_project_path(
+            project_registry,
+            project_id,
+        )
+
+        workspace_root = Path(
+            projects_root if projects_root is not None
+            else PROJECTS_ROOT
+        ).expanduser().resolve()
+
+        # Reject anything outside the configured workspace.
+        # Also protect the workspace root and the DevPilot repository.
+        if (
+            project_path == workspace_root
+            or not project_path.is_relative_to(workspace_root)
+            or project_path == PROJECT_ROOT
+            or project_path in PROJECT_ROOT.parents
+            or PROJECT_ROOT in project_path.parents
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Project folder must be inside the workspace "
+                    "and cannot be a protected folder."
+                ),
+            )
+
+        if not project_path.exists() or not project_path.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail="Project folder does not exist.",
+            )
+
+        try:
+            # Move the folder to the OS Recycle Bin.
+            send2trash(str(project_path))
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not move the project to the Recycle Bin.",
+            ) from exc
+
+        try:
+            project_registry.remove_project(project_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail="Project not found in the registry.",
+            ) from None
+
+        return {"deleted": project_id}
+
     # -----------------------------------------------------
-    # Project files: fixes the /tree 404
+    # Project file tree
     # -----------------------------------------------------
 
     @web_app.get("/tree")
@@ -405,7 +489,6 @@ def create_app(
 
                 relative = item.relative_to(root)
 
-                # Skip common generated and dependency directories.
                 if any(
                     part in {
                         ".git",
@@ -421,7 +504,6 @@ def create_app(
 
                 files.append(relative.as_posix())
 
-                # Prevent excessively large responses.
                 if len(files) >= 2000:
                     break
 
@@ -434,7 +516,7 @@ def create_app(
         return {"files": files}
 
     # -----------------------------------------------------
-    # Read a project file: fixes the /file 404
+    # Read a project file
     # -----------------------------------------------------
 
     @web_app.get("/file")
@@ -471,16 +553,13 @@ def create_app(
         return {"content": content}
 
     # -----------------------------------------------------
-    # Canvas/preview data: fixes the /outputs 404
+    # Canvas/preview data
     # -----------------------------------------------------
 
     @web_app.get("/outputs")
     def project_outputs(project_id: str = "default"):
         _safe_project_path(project_registry, project_id)
 
-        # The API contract expected by the current frontend.
-        # Actual generated preview/story-map data must be connected
-        # to the relevant output-storage implementation when available.
         return {
             "preview": None,
             "story_map": None,
@@ -518,7 +597,7 @@ def create_app(
             )
 
         start(
-            lambda: _run_agent(
+            lambda: _run_agent_safely(
                 selected_agent,
                 request.message,
                 project_stream,
@@ -563,7 +642,7 @@ def create_app(
             )
 
         start(
-            lambda: _run_agent(
+            lambda: _run_agent_safely(
                 agent_core,
                 request.message,
                 agent_core_stream,
@@ -610,8 +689,6 @@ def create_app(
                 approved=decision.approved,
             )
         except KeyError:
-            # Keep the endpoint compatible with clients/tests that
-            # submit a decision for a request that is no longer pending.
             pass
 
         return {

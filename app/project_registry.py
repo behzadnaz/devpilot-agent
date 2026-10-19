@@ -34,3 +34,11 @@ class ProjectRegistry:
             project_id: dict(config)
             for project_id, config in self._projects.items()
         }
+
+    def remove_project(self, project_id):
+        """Remove a project from the registry."""
+        try:
+            return self._projects.pop(project_id)
+        except KeyError:
+            raise KeyError(f"Unknown project: {project_id}") from None
+

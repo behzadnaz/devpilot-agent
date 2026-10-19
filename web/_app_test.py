@@ -1,6 +1,10 @@
-from fastapi.testclient import TestClient
+
+import shutil
+from pathlib import Path
 
 import web.app as web_app_module
+
+from fastapi.testclient import TestClient
 from app._llm_stub import _LLMStub, final_message, tool_call
 from app.approval import ApprovalManager
 from app.events import EventStream
@@ -14,209 +18,346 @@ class _AppTest:
         agent = _AgentStub()
         client = TestClient(create_app(agent, start=lambda job: job()))
 
-        started = client.post("/tasks", json={"message": "Create a calculator"})
+        started = client.post(
+            "/tasks",
+            json={"message": "Create a calculator"},
+        )
         everything = client.get("/events").json()
         rest = client.get("/events", params={"after": 1}).json()
 
-        assert started.status_code == 200, "the task starts"
-        assert agent.run_called_with == "Create a calculator", "the agent got the message"
+        assert started.status_code == 200
+        assert agent.run_called_with == "Create a calculator"
         assert everything == {
             "events": [
                 {"type": "status", "text": "step 1 of 20"},
                 {"type": "message", "text": "Done"},
             ],
             "next": 2,
-        }, "all events"
-        assert rest == {"events": [{"type": "message", "text": "Done"}], "next": 2}, "only the new events"
+        }
+        assert rest == {
+            "events": [{"type": "message", "text": "Done"}],
+            "next": 2,
+        }
 
     def test_the_page_is_served(self):
         client = TestClient(create_app(_AgentStub()))
 
         page = client.get("/")
 
-        assert page.status_code == 200, "the page is found"
-        assert 'id="projectMessage"' in page.text, "the page has a box for the message"
-        assert 'id="steps"' in page.text, "the page has a list for the steps"
+        assert page.status_code == 200
+        assert 'id="projectMessage"' in page.text
+        assert 'id="steps"' in page.text
 
     def test_task_is_sent_to_the_selected_project_agent(self):
         planning_agent = _AgentStub()
         development_agent = _AgentStub()
-        registry = _ProjectRegistryStub(agents={"planning": planning_agent, "development": development_agent})
-        client = TestClient(create_app(project_registry=registry, start=lambda job: job()))
+        registry = _ProjectRegistryStub(
+            agents={
+                "planning": planning_agent,
+                "development": development_agent,
+            }
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
 
-        response = client.post("/tasks", json={"project_id": "development", "message": "Write a unit test"})
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "development",
+                "message": "Write a unit test",
+            },
+        )
 
-        assert response.status_code == 200, "the task starts"
-        assert development_agent.run_called_with == "Write a unit test", "the selected agent got the message"
-        assert planning_agent.run_called_with is None, "the other agent got nothing"
+        assert response.status_code == 200
+        assert development_agent.run_called_with == "Write a unit test"
+        assert planning_agent.run_called_with is None
 
     def test_unknown_project_does_not_run_any_agent(self):
         planning_agent = _AgentStub()
         development_agent = _AgentStub()
-        registry = _ProjectRegistryStub(agents={"planning": planning_agent, "development": development_agent})
-        client = TestClient(create_app(project_registry=registry, start=lambda job: job()))
+        registry = _ProjectRegistryStub(
+            agents={
+                "planning": planning_agent,
+                "development": development_agent,
+            }
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
 
-        response = client.post("/tasks", json={"project_id": "unknown-project", "message": "Change a function"})
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "unknown-project",
+                "message": "Change a function",
+            },
+        )
 
-        assert response.status_code == 404, "an unknown project is not found"
-        assert planning_agent.run_called_with is None, "the planning agent got nothing"
-        assert development_agent.run_called_with is None, "the development agent got nothing"
+        assert response.status_code == 404
+        assert planning_agent.run_called_with is None
+        assert development_agent.run_called_with is None
 
     def test_lists_registered_projects(self):
         registry = _ProjectRegistryStub(
-            projects={"devpilot": {"workflow": "development"}, "my-project": {"workflow": "planning"}}
+            projects={
+                "devpilot": {"workflow": "development"},
+                "my-project": {"workflow": "planning"},
+            }
         )
-        client = TestClient(create_app(agent=None, project_registry=registry))
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
 
         response = client.get("/projects")
 
-        assert response.status_code == 200, "the list is returned"
+        assert response.status_code == 200
         assert response.json() == {
             "projects": [
                 {"id": "devpilot", "workflow": "development"},
                 {"id": "my-project", "workflow": "planning"},
             ]
-        }, "every project with its workflow"
+        }
 
-    def test_creates_project_through_api(self, tmp_path):
-        registry = _ProjectRegistryStub(projects={"devpilot": {"path": tmp_path / "devpilot", "workflow": "development"}})
-        client = TestClient(create_app(agent=None, project_registry=registry))
+    def test_creates_project_outside_configured_workspace(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+        workspace.mkdir()
+
+        chosen_folder = tmp_path / "Documents" / "MyNewProject"
+        chosen_folder.mkdir(parents=True)
+
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
 
         response = client.post(
             "/projects",
-            json={"id": "my-project", "path": str(tmp_path / "my-project"), "workflow": "planning"},
+            json={
+                "id": "my-new-project",
+                "path": str(chosen_folder),
+                "workflow": "development",
+            },
         )
 
-        assert response.status_code == 201, "the project is created"
-        assert response.json() == {"id": "my-project", "workflow": "planning"}, "the reply names the project"
-        assert "my-project" in registry.projects, "the registry has the new project"
+        assert response.status_code == 201, response.text
+        assert response.json() == {
+            "id": "my-new-project",
+            "workflow": "development",
+        }
+        assert (
+            registry.projects["my-new-project"]["path"]
+            == chosen_folder.resolve()
+        )
 
     def test_duplicate_project_creation_returns_conflict(self, tmp_path):
-        registry = _ProjectRegistryStub(projects={"devpilot": {"path": tmp_path / "devpilot", "workflow": "development"}})
-        client = TestClient(create_app(agent=None, project_registry=registry))
+        registry = _ProjectRegistryStub(
+            projects={
+                "devpilot": {
+                    "path": tmp_path / "devpilot",
+                    "workflow": "development",
+                }
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
 
         response = client.post(
             "/projects",
-            json={"id": "devpilot", "path": str(tmp_path / "replacement"), "workflow": "planning"},
+            json={
+                "id": "devpilot",
+                "path": str(tmp_path / "replacement"),
+                "workflow": "planning",
+            },
         )
 
-        assert response.status_code == 409, "a name that exists is a conflict"
-        assert response.json()["detail"] == "Project already exists: devpilot", "the reason"
-
-    def test_rejects_project_path_outside_workspace(self, tmp_path):
-        workspace = tmp_path / "projects"
-        workspace.mkdir()
-        outside_path = tmp_path / "private"
-        outside_path.mkdir()
-        registry = _ProjectRegistryStub()
-        client = TestClient(create_app(agent=None, project_registry=registry, projects_root=workspace))
-
-        response = client.post(
-            "/projects",
-            json={"id": "my-project", "path": str(outside_path), "workflow": "development"},
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == (
+            "Project already exists: devpilot"
         )
-
-        assert response.status_code == 400, "a path outside the workspace is refused"
-        assert registry.add_project_called_with is None, "nothing was added to the registry"
 
     def test_creates_workspace_through_api(self, tmp_path):
         workspace = tmp_path / "DevPilot-Workspace"
         client = TestClient(create_app(projects_root=workspace))
 
-        response = client.post("/workspace", json={"path": str(workspace)})
+        response = client.post(
+            "/workspace",
+            json={"path": str(workspace)},
+        )
 
-        assert response.status_code == 201, "the workspace is created"
-        assert response.json() == {"path": str(workspace)}, "the reply names the path"
-        assert workspace.is_dir(), "the folder exists"
+        assert response.status_code == 201
+        assert response.json() == {"path": str(workspace)}
+        assert workspace.is_dir()
 
-    def test_selects_project_folder_through_native_dialog(self, tmp_path, monkeypatch):
-        # Replace monkeypatch with an injected select_folder once create_app accepts one.
-        monkeypatch.setattr(web_app_module, "select_folder_dialog", lambda: str(tmp_path), raising=False)
+    def test_selects_project_folder_through_native_dialog(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            web_app_module,
+            "select_folder_dialog",
+            lambda: str(tmp_path),
+            raising=False,
+        )
         client = TestClient(create_app(projects_root=tmp_path))
 
         response = client.get("/select-folder")
 
-        assert response.status_code == 200, "the dialog result is returned"
-        assert response.json() == {"path": str(tmp_path)}, "the chosen folder"
+        assert response.status_code == 200
+        assert response.json() == {"path": str(tmp_path)}
 
-    def test_agent_core_accepts_message_without_creating_project(self, tmp_path):
+    def test_agent_core_accepts_message_without_creating_project(
+        self, tmp_path
+    ):
         agent_core = _AgentStub()
-        client = TestClient(create_app(agent_core=agent_core, projects_root=tmp_path, start=lambda job: job()))
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
 
-        response = client.post("/agent-core/tasks", json={"message": "Explain your architecture"})
+        response = client.post(
+            "/agent-core/tasks",
+            json={"message": "Explain your architecture"},
+        )
 
-        assert response.status_code == 200, "the message is accepted"
-        assert response.json() == {"started": True, "scope": "agent_core"}, "the reply names the scope"
-        assert agent_core.run_called_with == "Explain your architecture", "the core agent got the message"
+        assert response.status_code == 200
+        assert response.json() == {
+            "started": True,
+            "scope": "agent_core",
+        }
+        assert agent_core.run_called_with == "Explain your architecture"
         assert client.get("/agent-core/events").json()["events"] == [
             {"type": "status", "text": "step 1 of 20"},
             {"type": "message", "text": "Done"},
-        ], "the core chat has its events"
-        assert client.get("/events").json()["events"] == [], "the project chat has none"
+        ]
+        assert client.get("/events").json()["events"] == []
 
     def test_page_has_separate_agent_core_and_project_chats(self):
         client = TestClient(create_app(_AgentStub()))
 
         page = client.get("/")
 
-        assert page.status_code == 200, "the page is found"
-        assert 'id="agentCoreMessage"' in page.text, "the core chat has its message box"
-        assert 'id="projectMessage"' in page.text, "the project chat has its message box"
-        assert 'id="projectLog"' in page.text, "the project chat has its log"
+        assert page.status_code == 200
+        assert 'id="agentCoreMessage"' in page.text
+        assert 'id="projectMessage"' in page.text
+        assert 'id="projectLog"' in page.text
 
     def test_approval_endpoint_accepts_a_decision(self):
         client = TestClient(create_app(_AgentStub()))
 
-        response = client.post("/approvals/test-request", json={"approved": False})
+        response = client.post(
+            "/approvals/test-request",
+            json={"approved": False},
+        )
 
-        assert response.status_code == 200, "the decision is accepted"
-        assert response.json() == {"request_id": "test-request", "approved": False}, "the reply repeats the decision"
+        assert response.status_code == 200
+        assert response.json() == {
+            "request_id": "test-request",
+            "approved": False,
+        }
 
     def test_approval_endpoint_resolves_pending_request(self):
         manager = ApprovalManager()
-        request_id = manager.create_request(action="create_file", details={"path": "example.txt"})
-        client = TestClient(create_app(_AgentStub(), approval_manager=manager))
+        request_id = manager.create_request(
+            action="create_file",
+            details={"path": "example.txt"},
+        )
+        client = TestClient(
+            create_app(_AgentStub(), approval_manager=manager)
+        )
 
-        response = client.post(f"/approvals/{request_id}", json={"approved": False})
+        response = client.post(
+            f"/approvals/{request_id}",
+            json={"approved": False},
+        )
 
-        assert response.status_code == 200, "the decision is accepted"
-        assert response.json() == {"request_id": request_id, "approved": False}, "the reply repeats the decision"
-        assert manager.wait_for_decision(request_id) is False, "the waiting agent gets the decision"
+        assert response.status_code == 200
+        assert response.json() == {
+            "request_id": request_id,
+            "approved": False,
+        }
+        assert manager.wait_for_decision(request_id) is False
 
     def test_pending_approvals_endpoint_returns_unresolved_requests(self):
         manager = ApprovalManager()
-        request_id = manager.create_request(action="delete_file", details={"path": "example.txt"})
-        client = TestClient(create_app(agent=None, approval_manager=manager))
+        request_id = manager.create_request(
+            action="delete_file",
+            details={"path": "example.txt"},
+        )
+        client = TestClient(
+            create_app(agent=None, approval_manager=manager)
+        )
 
         response = client.get("/approvals")
 
-        assert response.status_code == 200, "the list is returned"
+        assert response.status_code == 200
         assert response.json() == {
-            "requests": [{"request_id": request_id, "action": "delete_file", "details": {"path": "example.txt"}}]
-        }, "the request that is still open"
+            "requests": [
+                {
+                    "request_id": request_id,
+                    "action": "delete_file",
+                    "details": {"path": "example.txt"},
+                }
+            ]
+        }
 
-    def test_build_project_registry_returns_the_configured_projects(self, tmp_path):
+    def test_build_project_registry_returns_the_configured_projects(
+        self, tmp_path
+    ):
         registry = web_app_module.build_project_registry(
-            {"demo": {"path": tmp_path, "workflow": "software-development"}},
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
             llm=_LLMStub([]),
         )
 
-        assert registry.get_config("demo")["path"] == tmp_path, "the project path"
-        assert registry.get_agent("demo") is not None, "the registry builds an agent for the project"
+        assert registry.get_config("demo")["path"] == tmp_path
+        assert registry.get_agent("demo") is not None
 
-    def test_agents_of_the_registry_can_run_the_command_in_limits_yaml(self, tmp_path):
-        llm = _LLMStub([tool_call("run_command", command="pytest -q"), final_message("Done.")])
+    def test_agents_of_the_registry_can_run_the_command_in_limits_yaml(
+        self, tmp_path
+    ):
+        llm = _LLMStub(
+            [
+                tool_call("run_command", command="pytest -q"),
+                final_message("Done."),
+            ]
+        )
         registry = web_app_module.build_project_registry(
-            {"demo": {"path": tmp_path, "workflow": "software-development"}},
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
             llm=llm,
         )
         events = EventStream()
 
         registry.get_agent("demo").run("Run the tests", events)
 
-        result = [event.text for event in events.since(0) if event.type == "tool_result"][0]
-        assert "exit code" in result, "the command from limits.yaml was run"
-
+        result = [
+            event.text
+            for event in events.since(0)
+            if event.type == "tool_result"
+        ][0]
+        assert "exit code" in result
 
     def test_chat_request_models_preserve_message_mode_and_tags(self):
         agent_core_request = web_app_module.AgentCoreRequest(
@@ -224,7 +365,6 @@ class _AppTest:
             mode="ask",
             tags=["ask"],
         )
-
         project_request = web_app_module.TaskRequest(
             message="Change the login function",
             project_id="demo",
@@ -234,7 +374,6 @@ class _AppTest:
 
         assert agent_core_request.mode == "ask"
         assert agent_core_request.tags == ["ask"]
-
         assert project_request.mode == "change"
         assert project_request.tags == ["change"]
 
@@ -289,3 +428,282 @@ class _AppTest:
         assert agent_core.run_mode == "ask"
         assert agent_core.run_tags == ["ask"]
 
+    def test_project_task_publishes_error_when_agent_crashes(self):
+        class FailingAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                raise RuntimeError("Simulated Ollama failure")
+
+        registry = _ProjectRegistryStub(
+            agents={"default": FailingAgent()}
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={"project_id": "default", "message": "hi"},
+        )
+
+        assert response.status_code == 200
+        events = client.get("/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Agent failed: Simulated Ollama failure",
+        }
+
+    def test_agent_core_publishes_error_when_agent_crashes(self, tmp_path):
+        class FailingAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                raise RuntimeError("Simulated Ollama failure")
+
+        client = TestClient(
+            create_app(
+                agent_core=FailingAgent(),
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={"message": "hi"},
+        )
+
+        assert response.status_code == 200
+        events = client.get("/agent-core/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Agent failed: Simulated Ollama failure",
+        }
+
+    def test_project_ai_backend_receives_exact_frontend_message(self):
+        project_agent = _AgentStub()
+        registry = _ProjectRegistryStub(
+            agents={"development": project_agent}
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        frontend_payload = {
+            "project_id": "development",
+            "message": "Please explain the login function.",
+            "mode": "ask",
+            "tags": ["ask"],
+        }
+
+        response = client.post("/tasks", json=frontend_payload)
+
+        assert response.status_code == 200
+        assert project_agent.run_called_with == (
+            "Please explain the login function."
+        )
+        assert project_agent.run_mode == "ask"
+        assert project_agent.run_tags == ["ask"]
+
+    def test_agent_core_backend_receives_exact_frontend_message(self, tmp_path):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        frontend_payload = {
+            "message": "Please explain the Agent Core architecture.",
+            "mode": "ask",
+            "tags": ["ask"],
+        }
+
+        response = client.post(
+            "/agent-core/tasks",
+            json=frontend_payload,
+        )
+
+        assert response.status_code == 200
+        assert agent_core.run_called_with == (
+            "Please explain the Agent Core architecture."
+        )
+        assert agent_core.run_mode == "ask"
+        assert agent_core.run_tags == ["ask"]
+
+    def test_deletes_project_and_its_folder(self, tmp_path):
+        project_folder = tmp_path / "my-project"
+        project_folder.mkdir()
+        (project_folder / "main.py").write_text(
+            "print('hello')", encoding="utf-8"
+        )
+
+        another_folder = tmp_path / "another-project"
+        another_folder.mkdir()
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "my-project": {
+                    "path": str(project_folder),
+                    "workflow": "software_development",
+                },
+                "another-project": {
+                    "path": str(another_folder),
+                    "workflow": "software_development",
+                },
+            }
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.delete("/projects/my-project")
+
+        assert response.status_code == 200
+        assert "my-project" not in registry.projects
+        assert "another-project" in registry.projects
+        assert not project_folder.exists()
+        assert another_folder.is_dir()
+
+    def test_delete_project_moves_folder_to_recycle_bin_and_removes_it_from_explore(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        project_path = workspace / "my-project"
+        other_path = workspace / "other-project"
+        recycle_bin = tmp_path / "recycle-bin"
+
+        project_path.mkdir(parents=True)
+        other_path.mkdir()
+        recycle_bin.mkdir()
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "my-project": {
+                    "path": project_path,
+                    "workflow": "software-development",
+                },
+                "other-project": {
+                    "path": other_path,
+                    "workflow": "software-development",
+                },
+            }
+        )
+
+        def fake_send2trash(path):
+            shutil.move(str(path), str(recycle_bin / Path(path).name))
+
+        monkeypatch.setattr(
+            web_app_module,
+            "send2trash",
+            fake_send2trash,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.delete("/projects/my-project")
+
+        assert response.status_code == 200
+        assert response.json() == {"deleted": "my-project"}
+        assert not project_path.exists()
+        assert (recycle_bin / "my-project").is_dir()
+        assert other_path.is_dir()
+        assert "my-project" not in registry.projects
+        assert "other-project" in registry.projects
+
+        listed = client.get("/projects").json()["projects"]
+        assert [project["id"] for project in listed] == ["other-project"]
+
+    def test_failed_project_deletion_keeps_project_registered(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        project_path = workspace / "my-project"
+        project_path.mkdir(parents=True)
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "my-project": {
+                    "path": project_path,
+                    "workflow": "software-development",
+                }
+            }
+        )
+
+        def fail_to_send_to_trash(path):
+            raise OSError("Recycle Bin operation failed")
+
+        monkeypatch.setattr(
+            web_app_module,
+            "send2trash",
+            fail_to_send_to_trash,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.delete("/projects/my-project")
+
+        assert response.status_code == 500
+        assert project_path.is_dir()
+        assert "my-project" in registry.projects
+
+    def test_delete_project_rejects_path_outside_workspace(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        outside_path = tmp_path / "private-project"
+        outside_path.mkdir()
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "private-project": {
+                    "path": outside_path,
+                    "workflow": "software-development",
+                }
+            }
+        )
+
+        def unexpected_trash_call(path):
+            raise AssertionError("An outside folder must never be moved")
+
+        monkeypatch.setattr(
+            web_app_module,
+            "send2trash",
+            unexpected_trash_call,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.delete("/projects/private-project")
+
+        assert response.status_code == 400
+        assert outside_path.is_dir()
+        assert "private-project" in registry.projects
