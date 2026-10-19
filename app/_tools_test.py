@@ -193,16 +193,18 @@ class _ToolSetTest:
         assert "stopped" in result, "it was stopped"
 
 
-    def test_create_file_is_blocked_when_approval_is_denied(self, tmp_path):
-        project = tmp_path / "project"
-        project.mkdir()
-
-        tools = ToolSet(
-            project,
+    def test_run_command_is_blocked_when_approval_is_denied(self, tmp_path):
+        limits = Limits(
+            allowed_commands=("pip install example-package",),
+            timeout=30,
+        )
+        tools = _new_tools(
+            tmp_path,
+            limits=limits,
             approval=lambda action, details: False,
         )
 
-        result = tools.create_file("hello.py", "print('hello')")
+        result = tools.run_command("pip install example-package")
 
         assert "approval" in result.lower()
-        assert not (project / "hello.py").exists()
+

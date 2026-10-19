@@ -3,7 +3,7 @@
     "type": "function",
     "function": {
       "name": "list_files",
-      "description": "List the files and folders in one folder of the project. Folders end with a slash.",
+      "description": "List the files and folders in one folder of the project. Use this to discover existing configuration files and identify the project's current technology stack. Folders end with a slash.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -20,7 +20,7 @@
     "type": "function",
     "function": {
       "name": "read_file",
-      "description": "Read a text file. A long file comes back in parts, and the reply says where the next part starts.",
+      "description": "Read a text file, especially project configuration files, dependency manifests, and documentation, to identify the existing technology stack and dependencies. A long file comes back in parts, and the reply says where the next part starts.",
       "parameters": {
         "type": "object",
         "properties": {

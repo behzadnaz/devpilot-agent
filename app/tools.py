@@ -133,7 +133,23 @@ class ToolSet:
         except Exception as error:
             return f"Error: {error}"
 
+
     def run_command(self, command):
+        # Require approval before attempting to install dependencies.
+        parts = command.split()
+        is_install_command = (
+            len(parts) >= 2
+            and parts[0].lower() in {"pip", "pip3"}
+            and parts[1].lower() == "install"
+        )
+
+        if is_install_command:
+            if not self._approval(
+                "install_dependency",
+                {"command": command},
+            ):
+                return "Error: approval denied for dependency installation"
+
         if not self._limits.allows(command):
             allowed = ", ".join(self._limits.allowed_commands) or "none"
             return (

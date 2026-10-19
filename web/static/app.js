@@ -1319,56 +1319,43 @@ function localStackAdvice(text) {
   ];
 }
 
+
+
 async function suggestStacks() {
   const description = $("stackGoal").value.trim();
   const status = $("stackGuideStatus");
   const list = $("stackSuggestions");
+  const button = $("stackSuggest");
 
-  list.replaceChildren();
-
-  if (!description) { status.textContent = "Describe what you want to build in one sentence."; return; }
-
-  status.textContent = "Thinking...";
-  $("stackSuggest").disabled = true;
-
-  let suggestions = [];
-  let note = "Pick one to use it:";
-
-  try {
-    const data = await postJson("/stack-advice", { description });
-    suggestions = data.suggestions || [];
-  } catch (error) {}
-
-  // Always show something, even if the AI could not answer.
-  if (!suggestions.length) {
-    suggestions = localStackAdvice(description);
-    note = "Quick suggestions (the AI could not answer right now). Pick one to use it:";
+  if (!description) {
+    status.textContent = "Describe what you want to build first.";
+    return;
   }
 
-  status.textContent = note;
+  button.disabled = true;
+  status.textContent = "Asking Ollama for stack recommendations...";
+  list.innerHTML = "";
 
-  suggestions.forEach(item => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "lang";
+  try {
+    const payload = { description };
 
-    const title = document.createElement("span");
-    title.textContent = item.stack;
+    if (selectedProjectId) {
+      payload.project_id = selectedProjectId;
+    }
 
-    const reason = document.createElement("small");
-    reason.textContent = item.reason || "";
+    const data = await postJson("/stack-advice", payload);
 
-    button.append(title, reason);
-    button.addEventListener("click", () => {
-      $("stackInput").value = item.stack;
-      $("stackGuide").hidden = true;
-      checkStack();
-    });
-    list.appendChild(button);
-  });
+    // Display the recommendations returned by the backend.
+    renderStackSuggestions(data);
 
-  $("stackSuggest").disabled = false;
-  list.scrollIntoView({ block: "nearest" });
+    status.textContent = "Stack recommendations are ready.";
+  } catch (error) {
+    console.error("Stack recommendation failed:", error);
+    status.textContent =
+      "Could not get recommendations. Check that Ollama is running and try again.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 $("stackSuggest").addEventListener("click", suggestStacks);

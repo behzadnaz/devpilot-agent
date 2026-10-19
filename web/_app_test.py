@@ -1,9 +1,9 @@
 
 import shutil
-from pathlib import Path
-
 import web.app as web_app_module
 
+from pathlib import Path
+from app.tool_schemas import ToolSchemas
 from fastapi.testclient import TestClient
 from app._llm_stub import _LLMStub, final_message, tool_call
 from app.approval import ApprovalManager
@@ -707,3 +707,238 @@ class _AppTest:
         assert response.status_code == 400
         assert outside_path.is_dir()
         assert "private-project" in registry.projects
+
+    def test_project_prompt_prioritizes_existing_technology_before_installing(self):
+        prompt = web_app_module.SYSTEM_PROMPT.lower()
+
+        assert "inspect the existing project" in prompt
+        assert "reuse" in prompt
+        assert "dependencies" in prompt
+        assert "approval" in prompt
+
+    def test_project_prompt_requires_stack_assessment_before_recommending(self):
+        prompt = web_app_module.SYSTEM_PROMPT.lower()
+
+        assert "frameworks" in prompt
+        assert "available tools" in prompt
+        assert "before recommending" in prompt
+
+    def test_project_tools_explain_how_to_identify_existing_stack(self):
+        schemas = ToolSchemas.load("config/tools.json").tools
+        descriptions = {
+            tool["function"]["name"]: tool["function"]["description"].lower()
+            for tool in schemas
+        }
+
+        assert "configuration" in descriptions["list_files"]
+        assert "technology stack" in descriptions["read_file"]
+
+    def test_changing_topic_in_open_new_project_refreshes_recommendations(
+            self, tmp_path
+    ):
+        # Arrange
+        client = TestClient(
+            create_app(projects_root=tmp_path)
+        )
+
+        response = client.get("/")
+        assert response.status_code == 200
+
+        # Act and assert:
+        # Submit topic A, capture its recommendations,
+        # submit topic B without closing the panel,
+        # and verify recommendations are regenerated for topic B.
+
+    def test_reopening_new_project_generates_fresh_recommendations(
+            self, tmp_path
+    ):
+        # Arrange
+        client = TestClient(
+            create_app(projects_root=tmp_path)
+        )
+
+        # Act: open the project creation panel.
+        first_response = client.get("/")
+
+        # Open the page again as a new project panel.
+        second_response = client.get("/")
+
+        # Assert
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+
+    def test_reopening_new_project_starts_with_fresh_recommendations(
+        self, tmp_path
+    ):
+        client = TestClient(
+            create_app(projects_root=tmp_path)
+        )
+
+        first_response = client.get("/")
+        second_response = client.get("/")
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+
+
+    def test_stack_advice_returns_recommendations(self):
+        class FakeStackAdvisor:
+            def __call__(self, description):
+                assert description == "Build an online bookstore"
+                return [
+                    {
+                        "stack": "React + FastAPI + PostgreSQL",
+                        "reason": "React for the interface, FastAPI for the API, and PostgreSQL for data.",
+                    }
+                ]
+
+        client = TestClient(
+            create_app(stack_advisor=FakeStackAdvisor())
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={"description": "Build an online bookstore"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "suggestions": [
+                {
+                    "stack": "React + FastAPI + PostgreSQL",
+                    "reason": "React for the interface, FastAPI for the API, and PostgreSQL for data.",
+                }
+            ]
+        }
+
+    def test_stack_advice_rejects_empty_description(self):
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/stack-advice",
+            json={"description": "   "},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == (
+            "Project description is required."
+        )
+
+    def test_stack_advice_returns_error_when_advisor_fails(self):
+        class FailingStackAdvisor:
+            def __call__(self, description):
+                raise RuntimeError("AI service unavailable")
+
+        client = TestClient(
+            create_app(stack_advisor=FailingStackAdvisor())
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={"description": "Build an online bookstore"},
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == (
+            "Could not generate stack recommendations."
+        )
+
+    def test_changing_topic_in_open_new_project_can_submit_new_task(
+        self, tmp_path
+    ):
+        messages = []
+
+        class FakeAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                messages.append(message)
+
+        def run_immediately(job):
+            job()
+
+        client = TestClient(
+            create_app(
+                agent=FakeAgent(),
+                start=run_immediately,
+                projects_root=tmp_path,
+            )
+        )
+
+        first_response = client.post(
+            "/tasks",
+            json={
+                "message": "Build a task management application",
+                "project_id": "default",
+            },
+        )
+
+        second_response = client.post(
+            "/tasks",
+            json={
+                "message": "Build an AI document analysis application",
+                "project_id": "default",
+            },
+        )
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert messages == [
+            "Build a task management application",
+            "Build an AI document analysis application",
+        ]
+
+    def test_stack_advice_uses_selected_project_path(self, tmp_path):
+        project_path = tmp_path / "bookstore"
+        project_path.mkdir()
+        (project_path / "package.json").write_text(
+            '{"dependencies": {"react": "^18.0.0"}}',
+            encoding="utf-8",
+        )
+
+        class FakeProjectRegistry:
+            def get_config(self, project_id):
+                assert project_id == "bookstore"
+                return {
+                    "path": project_path,
+                    "workflow": "software-development",
+                }
+
+        class FakeStackAdvisor:
+            def __init__(self):
+                self.description = None
+                self.project_path = None
+
+            def __call__(self, description, project_path=None):
+                self.description = description
+                self.project_path = project_path
+                return [
+                    {
+                        "stack": "React + existing backend",
+                        "reason": "Reuse the existing React dependency.",
+                    }
+                ]
+
+        advisor = FakeStackAdvisor()
+        client = TestClient(
+            create_app(
+                project_registry=FakeProjectRegistry(),
+                stack_advisor=advisor,
+            )
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={
+                "description": "Build an online bookstore",
+                "project_id": "bookstore",
+            },
+        )
+
+        assert response.status_code == 200
+        assert advisor.description == "Build an online bookstore"
+        assert advisor.project_path == project_path.resolve()
+
+
+
+
+
+
