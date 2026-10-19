@@ -899,8 +899,8 @@ html = `<!doctype html>
     treeStatus.textContent = error.message || "Could not open the file.";
   }
 }
-
 // ----- projects -----
+
 async function loadProjects() {
   listStatus.textContent = "Loading projects...";
 
@@ -908,88 +908,147 @@ async function loadProjects() {
     const response = await fetch("/projects");
     const data = await response.json();
 
-    if (!response.ok) throw new Error(data.detail || "Could not load projects.");
+    if (!response.ok) {
+      throw new Error(data.detail || "Could not load projects.");
+    }
 
     const projects = data.projects || [];
-    knownProjects = new Set(projects.map(p => p.id));
+
+    knownProjects = new Set(projects.map(project => project.id));
     projectList.replaceChildren();
 
-for (const project of projects) {
-  const item = document.createElement("li");
+    for (const project of projects) {
+      const item = document.createElement("li");
 
-  // Open project button
-  const openButton = document.createElement("button");
-  openButton.type = "button";
-  openButton.dataset.id = project.id;
-  openButton.className =
-    project.id === selectedProjectId ? "active" : "";
-  openButton.innerHTML = icon("folder");
-  openButton.append(project.id);
-  openButton.addEventListener("click", () => selectProject(project.id));
+      // Open project button
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.dataset.id = project.id;
+      openButton.className =
+        project.id === selectedProjectId ? "active" : "";
+      openButton.innerHTML = icon("folder");
+      openButton.append(document.createTextNode(project.id));
 
-  // Delete project button
-  const deleteButton = document.createElement("button");
-  deleteButton.type = "button";
-  deleteButton.textContent = "Delete";
-  deleteButton.className = "delete-project";
-  deleteButton.title = "Move " + project.id + " to the Recycle Bin";
+      openButton.addEventListener("click", () => {
+        selectProject(project.id);
+      });
 
-  deleteButton.addEventListener("click", async (event) => {
-    event.stopPropagation();
-
-    if (!confirm('Move project "' + project.id + '" to the Recycle Bin?')) {
-      return;
-    }
-
-    deleteButton.disabled = true;
-    listStatus.textContent = "Moving project to the Recycle Bin...";
-
-    try {
-      const response = await fetch(
-        "/projects/" + encodeURIComponent(project.id),
-        { method: "DELETE" }
+      // Delete project button with trash icon
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "delete-project";
+      deleteButton.title =
+        'Move "' + project.id + '" to the Recycle Bin';
+      deleteButton.setAttribute(
+        "aria-label",
+        'Move project "' + project.id + '" to the Recycle Bin'
       );
 
-      const data = await response.json().catch(() => ({}));
+      deleteButton.innerHTML =
+        '<svg class="icon" aria-hidden="true">' +
+        '<use href="#i-trash"></use>' +
+        '</svg>';
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Could not delete the project.");
-      }
+      deleteButton.addEventListener("click", async event => {
+        event.stopPropagation();
 
-      if (selectedProjectId === project.id) {
-        selectedProjectId = "";
-        remember("devpilot.project", "");
-        clearChat();
-      }
+        // Ask for confirmation before deleting
+        if (
+          !confirm(
+            'Move project "' + project.id + '" to the Recycle Bin?'
+          )
+        ) {
+          return;
+        }
 
-      await loadProjects();
-      listStatus.textContent = "Project moved to the Recycle Bin.";
-    } catch (error) {
-      listStatus.textContent =
-        error.message || "Could not delete the project.";
-      deleteButton.disabled = false;
+        deleteButton.disabled = true;
+        listStatus.textContent =
+          "Moving project to the Recycle Bin...";
+
+        try {
+          // Stop the task if this project is currently running
+          if (selectedProjectId === project.id && running) {
+            await postJson("/tasks/stop", {
+              project_id: project.id
+            });
+          }
+
+          // Delete the project
+          const deleteResponse = await fetch(
+            "/projects/" + encodeURIComponent(project.id),
+            { method: "DELETE" }
+          );
+
+          const result = await deleteResponse.json().catch(() => ({}));
+
+          if (!deleteResponse.ok) {
+            throw new Error(
+              result.detail || "Could not delete the project."
+            );
+          }
+
+          // Reset the interface if this was the selected project
+          if (selectedProjectId === project.id) {
+            selectedProjectId = "";
+            remember("devpilot.project", "");
+
+            setRunning(false);
+            taskStart = 0;
+            stepCount = 0;
+            changedFiles = new Set();
+
+            if (taskMeta) {
+              taskMeta.textContent = "";
+            }
+
+            if (retryTask) {
+              retryTask.hidden = true;
+            }
+
+            if (treeBlock) {
+              treeBlock.hidden = true;
+            }
+
+            if (treeList) {
+              treeList.replaceChildren();
+            }
+
+            clearOutputs();
+            setChatEnabled(false);
+            projectLog.replaceChildren();
+
+            appendChatMessage(
+              projectLog,
+              "Project AI",
+              "Create, import, or open a project to start.",
+              false
+            );
+          }
+
+          // Refresh the project list
+          await loadProjects();
+
+          listStatus.textContent =
+            "Project moved to the Recycle Bin.";
+        } catch (error) {
+          listStatus.textContent =
+            error.message || "Could not delete the project.";
+
+          deleteButton.disabled = false;
+        }
+      });
+
+      // Add both buttons to the project row
+      item.append(openButton, deleteButton);
+      projectList.appendChild(item);
     }
-  });
 
-  item.append(openButton, deleteButton);
-  projectList.appendChild(item);
-}
-catch (error) {
-      listStatus.textContent =
-        error.message || "Could not delete the project.";
-      deleteButton.disabled = false;
-    }
-  });
-
-  item.append(openButton, deleteButton);
-  projectList.appendChild(item);
-}
-
-    }
-
-    listStatus.textContent = projects.length ? "" : "No projects yet. Create or import one.";
+    listStatus.textContent = projects.length
+      ? ""
+      : "No projects yet. Create or import one.";
   } catch (error) {
-    listStatus.textContent = error.message || "Could not load projects.";
+    listStatus.textContent =
+      error.message || "Could not load projects.";
   }
 }
 

@@ -391,7 +391,6 @@ h2 .icon, h3 .icon { margin-right: 8px; }
   object-fit: contain;
   flex-shrink: 0;
   margin-right: 6px;
-
 }
 
 .topbar .ghost, .menu-list a, .menu-list button {
@@ -971,3 +970,34 @@ aside.core-panel .core-head { background: var(--core-head); }
 .tagbar .tag.on { background: var(--tc); border-color: var(--tc); color: var(--on-accent); box-shadow: none; font-weight: 700; }
 .tagbar .tag.on .icon { opacity: 1; }
 
+
+/* Project list: show Open and Delete buttons */
+.plist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plist li > button:first-child {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.plist li > button.delete-project {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.plist li > button.delete-project:hover {
+  border-color: var(--accent);
+  background: var(--card);
+}
