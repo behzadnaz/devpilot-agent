@@ -1,4 +1,3 @@
-
 import shutil
 import web.app as web_app_module
 
@@ -10,8 +9,7 @@ from app.approval import ApprovalManager
 from app.events import EventStream
 from web._agent_stub import _AgentStub
 from web._project_registry_stub import _ProjectRegistryStub
-from web.app import create_app
-
+from web.app import create_app, app
 
 class _AppTest:
     def test_start_task_request_streams_the_events(self):
@@ -822,33 +820,135 @@ class _AppTest:
         assert first_response.status_code == 200
         assert second_response.status_code == 200
 
+    def test_stack_advice_uses_limited_generation_options(self, monkeypatch):
+        class FakeLLM:
+            def __init__(self):
+                self.ask_kwargs = None
 
-    def test_stack_advice_returns_recommendations(self):
+            def ask(self, prompt, **kwargs):
+                self.ask_kwargs = kwargs
+                return (
+                    '[{"stack": "FastAPI", '
+                    '"reason": "Simple backend for the bookstore."}]'
+                )
+
+        fake_llm = FakeLLM()
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: fake_llm,
+        )
+
+        web_app_module.generate_stack_advice(
+            "Build a simple bookstore"
+        )
+
+        assert fake_llm.ask_kwargs["options"]["num_predict"] == 1024
+        assert fake_llm.ask_kwargs["think"] is False
+
+    def test_stack_advice_endpoint_returns_recommendations(self):
         class FakeStackAdvisor:
-            def __call__(self, description):
-                assert description == "Build an online bookstore"
+            def __call__(self, description, project_path=None):
+                assert description == (
+                    "Build a task management web application"
+                )
                 return [
                     {
-                        "stack": "React + FastAPI + PostgreSQL",
-                        "reason": "React for the interface, FastAPI for the API, and PostgreSQL for data.",
+                        "stack": "FastAPI + React",
+                        "reason": (
+                            "Provides a Python backend and a modern frontend."
+                        ),
                     }
                 ]
 
         client = TestClient(
-            create_app(stack_advisor=FakeStackAdvisor())
+            create_app(
+                stack_advisor=FakeStackAdvisor(),
+                project_registry=_ProjectRegistryStub(),
+            )
         )
 
         response = client.post(
             "/stack-advice",
-            json={"description": "Build an online bookstore"},
+            json={
+                "description": (
+                    "Build a task management web application"
+                )
+            },
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert response.json() == {
             "suggestions": [
                 {
-                    "stack": "React + FastAPI + PostgreSQL",
-                    "reason": "React for the interface, FastAPI for the API, and PostgreSQL for data.",
+                    "stack": "FastAPI + React",
+                    "reason": (
+                        "Provides a Python backend and a modern frontend."
+                    ),
+                }
+            ]
+        }
+
+    def test_stack_advice_endpoint_returns_recommendations(self, tmp_path):
+        project_path = tmp_path / "task-manager"
+        project_path.mkdir()
+
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                assert description == (
+                    "Build a task management web application"
+                )
+                assert project_path is not None
+
+                return [
+                    {
+                        "stack": "FastAPI + React",
+                        "reason": (
+                            "Provides a Python backend and a modern frontend."
+                        ),
+                    }
+                ]
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "task-manager": {
+                    "path": project_path,
+                    "workflow": "software-development",
+                }
+            }
+        )
+
+        client = TestClient(
+            create_app(
+                stack_advisor=FakeStackAdvisor(),
+                project_registry=registry,
+            )
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={
+                "description": (
+                    "Build a task management web application"
+                ),
+                "project_id": "task-manager",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "suggestions": [
+                {
+                    "stack": "FastAPI + React",
+                    "reason": (
+                        "Provides a Python backend and a modern frontend."
+                    ),
                 }
             ]
         }
@@ -1024,6 +1124,15 @@ class _AppTest:
             "current_component": "technology-stack",
         }
 
+    def test_frontend_uses_shared_ai_for_stack_recommendations(self):
+        client = TestClient(create_app())
+
+        response = client.get("/static/app.js")
+
+        assert response.status_code == 200
+        assert 'requestAI("stack-recommendations"' in response.text
+
+
     def test_shared_ai_api_does_not_start_project_or_agent_core_tasks(self):
         class FakeAICapabilities:
             def execute(self, capability, inputs, context=None):
@@ -1120,6 +1229,348 @@ class _AppTest:
             }
         ]
 
+    def test_stack_recommendation_renderer_exists(self):
+        app_js = (
+                Path(__file__).parent
+                / "static"
+                / "app.js"
+        ).read_text(encoding="utf-8")
+
+        assert "function renderStackSuggestions(" in app_js
+
+    def test_default_app_configures_shared_ai_capabilities(self):
+        routes = {
+            route.path: route
+            for route in app.routes
+        }
+
+        assert "/ai/request" in routes
+
+    def test_default_app_has_configured_ai_capabilities(self):
+        assert app.state.ai_capabilities is not None
+        assert isinstance(
+            app.state.ai_capabilities,
+            web_app_module.AICapabilities,
+        )
+
+
+    def test_default_app_executes_stack_recommendations(self):
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                return [
+                    {
+                        "stack": "FastAPI + PostgreSQL",
+                        "reason": "Suitable for the application.",
+                    }
+                ]
+
+        app.state.ai_capabilities.stack_advisor = FakeStackAdvisor()
+
+        try:
+            response = TestClient(app).post(
+                "/ai/request",
+                json={
+                    "capability": "stack-recommendations",
+                    "input": {
+                        "description": "Build an online bookstore"
+                    },
+                },
+            )
+        finally:
+            # Restore the original advisor after the test.
+            app.state.ai_capabilities.stack_advisor = (
+                web_app_module.generate_stack_advice
+            )
+
+        assert response.status_code == 200
+        assert response.json()["result"]["recommendations"][0][
+            "stack"
+        ] == "FastAPI + PostgreSQL"
+
+    def test_default_ai_capabilities_support_stack_recommendations(
+        self, monkeypatch
+    ):
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                assert description == "Build an online bookstore"
+                return [
+                    {
+                        "stack": "FastAPI + PostgreSQL",
+                        "reason": "Suitable for the application.",
+                    }
+                ]
+
+        monkeypatch.setattr(
+            web_app_module,
+            "generate_stack_advice",
+            FakeStackAdvisor(),
+        )
+
+        client = TestClient(
+            web_app_module.create_app(
+                ai_capabilities=web_app_module.AICapabilities()
+            )
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {
+                "recommendations": [
+                    {
+                        "stack": "FastAPI + PostgreSQL",
+                        "reason": "Suitable for the application.",
+                    }
+                ]
+            }
+        }
+
+    def test_live_stack_advice_diagnostic(self):
+        recommendations = web_app_module.generate_stack_advice(
+            "Build a simple online bookstore"
+        )
+
+        print("Stack recommendations:", repr(recommendations))
+
+        assert isinstance(recommendations, list)
+        assert recommendations, "No recommendations were returned"
+
+    def test_project_ask_mode_reaches_real_agent_loop(self, tmp_path):
+        target = tmp_path / "must_not_be_created.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="must_not_be_created.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing files."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Explain the project without changing files",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not target.exists()
+
+    def test_project_ask_mode_reaches_real_agent_loop(self, tmp_path):
+        target = tmp_path / "must_not_be_created.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="must_not_be_created.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing files."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Explain the project without changing files",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not target.exists()
+
+    def test_project_change_mode_allows_file_creation(self, tmp_path):
+        target = tmp_path / "created_by_change_mode.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="created_by_change_mode.py",
+                    content="print('created')",
+                ),
+                final_message("File created successfully."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Create a Python file",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "print('created')"
+
+    def test_agent_core_ask_mode_blocks_file_creation(self, tmp_path):
+        target = tmp_path / "must_not_be_created.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="must_not_be_created.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing Agent Core."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "agent-core": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            system_prompt=web_app_module.AGENT_CORE_SYSTEM_PROMPT,
+            llm=llm,
+        )
+
+        agent_core = registry.get_agent("agent-core")
+
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={
+                "message": "Explain the code without modifying files",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["scope"] == "agent_core"
+        assert not target.exists()
+
+    def test_agent_core_change_mode_allows_file_creation(self, tmp_path):
+        target = tmp_path / "created_by_agent_core.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="created_by_agent_core.py",
+                    content="print('agent core')",
+                ),
+                final_message("File created successfully."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "agent-core": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            system_prompt=web_app_module.AGENT_CORE_SYSTEM_PROMPT,
+            llm=llm,
+        )
+
+        agent_core = registry.get_agent("agent-core")
+
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={
+                "message": "Create a Python file",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["scope"] == "agent_core"
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "print('agent core')"
 
 
 

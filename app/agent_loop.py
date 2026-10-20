@@ -9,7 +9,7 @@ class AgentLoop:
         self._system_prompt = system_prompt
         self._max_steps = max_steps
 
-    def run(self, task, events):
+    def run(self, task, events, mode="auto", tags=None):
         messages = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": task},
@@ -26,7 +26,20 @@ class AgentLoop:
                 events.publish("message", f"The model gave a reply I cannot use: {parsed.text}")
                 return
             events.publish("tool_call", f"{parsed.name} {parsed.arguments}")
-            result = getattr(self._tools, parsed.name)(**parsed.arguments)
+            if mode == "ask" and parsed.name in {
+                "create_file",
+                "edit_file",
+                "move_file",
+                "delete_file",
+                "run_command",
+            }:
+                result = (
+                    f"Error: tool '{parsed.name}' is not allowed in Ask mode. "
+                    "You can inspect files and answer questions, but you cannot modify the project."
+                )
+            else:
+                result = getattr(self._tools, parsed.name)(**parsed.arguments)
+
             events.publish("tool_result", result)
             messages.append(
                 {

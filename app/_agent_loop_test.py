@@ -4,7 +4,7 @@ from app.events import Event, EventStream
 from app.reply_parser import ReplyParser
 from app.tools import ToolSet
 
-REQUIRED = {"list_files": [], "read_file": ["path"], "create_file": ["path", "content"]}
+REQUIRED = {"list_files": [], "read_file": ["path"], "create_file": ["path", "content"], "edit_file": ["path", "old_text", "new_text"],}
 
 
 def _new_loop(tmp_path, messages, **options):
@@ -87,3 +87,129 @@ class _AgentLoopTest:
         loop.run("Never finish", EventStream())
 
         assert len(llm.calls) == 3, "exactly the step limit"
+
+    def test_ask_mode_does_not_create_files(self, tmp_path):
+        target = tmp_path / "should_not_exist.py"
+        loop, _ = _new_loop(
+            tmp_path,
+            [
+                tool_call(
+                    "create_file",
+                    path="should_not_exist.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing files."),
+            ],
+        )
+        events = EventStream()
+
+        loop.run(
+            "Create a file",
+            events,
+            mode="ask",
+            tags=["ask"],
+        )
+
+        assert not target.exists(), "Ask mode must not create files"
+
+    def test_ask_mode_does_not_edit_files(self, tmp_path):
+        target = tmp_path / "existing.py"
+        target.write_text("print('original')")
+
+        loop, _ = _new_loop(
+            tmp_path,
+            [
+                tool_call(
+                    "edit_file",
+                    path="existing.py",
+                    old_text="original",
+                    new_text="changed",
+                ),
+                final_message("I can answer without changing files."),
+            ],
+        )
+        events = EventStream()
+
+        loop.run(
+            "Change the file",
+            events,
+            mode="ask",
+            tags=["ask"],
+        )
+
+        assert target.read_text() == "print('original')"
+
+    def test_ask_mode_does_not_move_files(self, tmp_path):
+        source = tmp_path / "original.py"
+        destination = tmp_path / "renamed.py"
+        source.write_text("print('original')")
+
+        loop, _ = _new_loop(
+            tmp_path,
+            [
+                tool_call(
+                    "move_file",
+                    source="original.py",
+                    destination="renamed.py",
+                ),
+                final_message("I can answer without changing files."),
+            ],
+        )
+        events = EventStream()
+
+        loop.run(
+            "Move the file",
+            events,
+            mode="ask",
+            tags=["ask"],
+        )
+
+        assert source.exists()
+        assert not destination.exists()
+
+    def test_ask_mode_does_not_delete_files(self, tmp_path):
+        target = tmp_path / "important.py"
+        target.write_text("print('keep this file')")
+
+        loop, _ = _new_loop(
+            tmp_path,
+            [
+                tool_call("delete_file", path="important.py"),
+                final_message("I can answer without changing files."),
+            ],
+        )
+        events = EventStream()
+
+        loop.run(
+            "Delete the file",
+            events,
+            mode="ask",
+            tags=["ask"],
+        )
+
+        assert target.exists()
+        assert target.read_text() == "print('keep this file')"
+
+    def test_ask_mode_does_not_run_commands(self, tmp_path):
+        target = tmp_path / "command_created.txt"
+
+        loop, _ = _new_loop(
+            tmp_path,
+            [
+                tool_call(
+                    "run_command",
+                    command="python -c \"from pathlib import Path; Path('command_created.txt').write_text('changed')\"",
+                ),
+                final_message("I can answer without changing files."),
+            ],
+        )
+        events = EventStream()
+
+        loop.run(
+            "Create a file using a command",
+            events,
+            mode="ask",
+            tags=["ask"],
+        )
+
+        assert not target.exists()

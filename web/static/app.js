@@ -1333,6 +1333,33 @@ function localStackAdvice(text) {
 }
 
 
+function renderStackSuggestions(data) {
+  const list = $("stackSuggestions");
+  const suggestions = Array.isArray(data?.suggestions)
+    ? data.suggestions
+    : [];
+
+  list.replaceChildren();
+
+  if (suggestions.length === 0) {
+    list.textContent = "No recommendations were returned.";
+    return;
+  }
+
+  suggestions.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "stack-suggestion";
+
+    const title = document.createElement("h4");
+    title.textContent = item.stack || "Suggested technology stack";
+
+    const reason = document.createElement("p");
+    reason.textContent = item.reason || "";
+
+    card.append(title, reason);
+    list.appendChild(card);
+  });
+}
 
 async function suggestStacks() {
   const description = $("stackGoal").value.trim();
@@ -1347,19 +1374,63 @@ async function suggestStacks() {
 
   button.disabled = true;
   status.textContent = "Asking Ollama for stack recommendations...";
-  list.innerHTML = "";
+  list.replaceChildren();
 
-  try {
-    const payload = { description };
+ try {
+  const context = selectedProjectId
+    ? { project_id: selectedProjectId }
+    : null;
 
-    if (selectedProjectId) {
-      payload.project_id = selectedProjectId;
+  const data = await requestAI("stack-recommendations", { description }, context);
+
+  const recommendations = data.result?.recommendations;
+
+    if (!Array.isArray(recommendations) || recommendations.length === 0) {
+      throw new Error("No recommendations were returned.");
     }
 
-    const data = await postJson("/stack-advice", payload);
+    recommendations.forEach((recommendation) => {
+      const item = document.createElement("div");
+      item.className = "stack-suggestion";
 
-    // Display the recommendations returned by the backend.
-    renderStackSuggestions(data);
+      if (typeof recommendation === "string") {
+        item.textContent = recommendation;
+      } else if (
+        recommendation &&
+        typeof recommendation === "object"
+      ) {
+        const title =
+          recommendation.name ||
+          recommendation.title ||
+          recommendation.stack ||
+          recommendation.technology;
+
+        const details =
+          recommendation.reason ||
+          recommendation.description ||
+          recommendation.rationale;
+
+        if (title) {
+          const heading = document.createElement("strong");
+          heading.textContent = String(title);
+          item.appendChild(heading);
+        }
+
+        if (details) {
+          const paragraph = document.createElement("p");
+          paragraph.textContent = String(details);
+          item.appendChild(paragraph);
+        }
+
+        if (!title && !details) {
+          item.textContent = JSON.stringify(recommendation);
+        }
+      } else {
+        item.textContent = String(recommendation);
+      }
+
+      list.appendChild(item);
+    });
 
     status.textContent = "Stack recommendations are ready.";
   } catch (error) {
@@ -1370,6 +1441,7 @@ async function suggestStacks() {
     button.disabled = false;
   }
 }
+
 
 $("stackSuggest").addEventListener("click", suggestStacks);
 $("stackGoal").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); suggestStacks(); } });

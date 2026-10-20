@@ -1,31 +1,45 @@
+
 from pathlib import Path
 
 import ollama
 
 from app.config import ModelSettings
 
-MODEL_FILE = Path(__file__).resolve().parent.parent / "config" / "model.yaml"
+MODEL_FILE = (
+    Path(__file__).resolve().parent.parent / "config" / "model.yaml"
+)
+
 DEFAULT_SYSTEM = "You are a helpful assistant."
 
 
 class LLMClient:
-    """Sends chat messages to the model. The ollama client is passed in."""
+    """Sends chat messages to the model. The Ollama client is passed in."""
 
-    def __init__(self, settings, ollama_client):
+    def __init__(self, settings: ModelSettings, ollama_client):
         self._settings = settings
         self._ollama_client = ollama_client
 
-    def ask(self, prompt, system=DEFAULT_SYSTEM):
-        response = self._ollama_client.chat(
-            model=self._settings.model,
-            messages=[
+    def ask(self, prompt, system=DEFAULT_SYSTEM, options=None, think=None):
+        """Send a prompt to the model and return its text response."""
+        kwargs = {
+            "model": self._settings.model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-        )
+        }
+
+        if options is not None:
+            kwargs["options"] = options
+
+        if think is not None:
+            kwargs["think"] = think
+
+        response = self._ollama_client.chat(**kwargs)
         return response.message.content
 
     def chat(self, messages, tools):
+        """Send messages and tool definitions to the model."""
         response = self._ollama_client.chat(
             model=self._settings.model,
             messages=messages,
@@ -35,12 +49,3 @@ class LLMClient:
 
 
 _default_client = None
-
-
-def ask(prompt: str, system: str = DEFAULT_SYSTEM) -> str:
-    """Send one question to the model and return its answer as text."""
-    global _default_client
-    if _default_client is None:
-        settings = ModelSettings.load(MODEL_FILE)
-        _default_client = LLMClient(settings, ollama.Client(host=settings.endpoint))
-    return _default_client.ask(prompt, system)
