@@ -22,3 +22,7 @@ class EventStream:
 
     def since(self, index):
         return self._events[index:]
+
+    @property
+    def count(self):
+        return len(self._events)

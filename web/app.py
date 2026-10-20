@@ -3,15 +3,17 @@ import inspect
 import json
 import os
 import threading
-from pathlib import Path
+import logging
+import time
 
 import ollama
+
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from send2trash import send2trash
-
 from app.agent_factory import AgentFactory
 from app.approval import ApprovalManager
 from app.config import ModelSettings
@@ -21,6 +23,7 @@ from app.llm import LLMClient
 from app.project_registry import ProjectRegistry
 from app.tool_schemas import ToolSchemas
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------
 # Paths and configuration
@@ -135,6 +138,7 @@ def _run_agent_safely(
     events,
     mode="ask",
     tags=None,
+    agent_name="Agent",
 ):
     """Run an agent and publish an error if the task crashes."""
     try:
@@ -154,7 +158,17 @@ def _run_agent_safely(
         if "tags" in parameters or accepts_extra_keywords:
             kwargs["tags"] = tags or []
 
-        run_method(message, events, **kwargs)
+        started_at = time.perf_counter()
+
+        try:
+            run_method(message, events, **kwargs)
+        finally:
+            elapsed = time.perf_counter() - started_at
+            logger.warning(
+                "%s execution finished in %.3f seconds",
+                agent_name,
+                elapsed,
+            )
 
     except Exception as exc:
         events.publish("status", "failed")
@@ -927,6 +941,7 @@ def create_app(
                 project_stream,
                 request.mode,
                 request.tags,
+                agent_name="Project AI",
             )
         )
 
@@ -966,13 +981,18 @@ def create_app(
                 agent_core_stream,
                 request.mode,
                 request.tags,
+                agent_name="Agent Core",
             )
         )
 
         return {"started": True, "scope": "agent_core"}
 
+
     @web_app.get("/agent-core/events")
     def agent_core_events(after: int = 0):
+        if after > agent_core_stream.count:
+            after = 0
+
         found = agent_core_stream.since(after)
 
         return {

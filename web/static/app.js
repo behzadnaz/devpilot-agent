@@ -308,6 +308,12 @@ async function pollAgentCore() {
         agentCoreStatus.textContent = "Response received.";
       } else if (event.type === "status") {
         agentCoreStatus.textContent = event.text;
+
+        if (event.text === "failed") {
+          hideTyping(agentCoreLog);
+          coreBusy = false;
+          syncCoreSend();
+        }
       } else if (event.type === "error") {
         agentCoreStatus.textContent = event.text || "The task failed.";
         hideTyping(agentCoreLog);

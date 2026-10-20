@@ -213,3 +213,21 @@ class _AgentLoopTest:
         )
 
         assert not target.exists()
+
+
+    def test_step_limit_publishes_failure_status_and_message(self, tmp_path):
+        loop, llm = _new_loop(
+            tmp_path,
+            [tool_call("list_files") for _ in range(3)],
+            max_steps=3,
+        )
+        events = EventStream()
+
+        loop.run("Never finish", events)
+
+        published = events.since(0)
+
+        assert len(llm.calls) == 3
+        assert published[-2] == Event("status", "failed")
+        assert published[-1].type == "message"
+        assert "step limit" in published[-1].text.lower()

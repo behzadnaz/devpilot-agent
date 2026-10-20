@@ -1238,6 +1238,25 @@ class _AppTest:
 
         assert "function renderStackSuggestions(" in app_js
 
+    def test_agent_core_resets_busy_state_on_failed_status(self):
+        app_js = (
+            Path(__file__).parent
+            / "static"
+            / "app.js"
+        ).read_text(encoding="utf-8")
+
+        status_branch = app_js.split(
+            'event.type === "status"',
+            maxsplit=1,
+        )[1].split(
+            'event.type === "error"',
+            maxsplit=1,
+        )[0]
+
+        assert 'event.text === "failed"' in status_branch
+        assert "coreBusy = false;" in status_branch
+        assert "syncCoreSend();" in status_branch
+
     def test_default_app_configures_shared_ai_capabilities(self):
         routes = {
             route.path: route
@@ -1571,6 +1590,57 @@ class _AppTest:
         assert response.json()["scope"] == "agent_core"
         assert target.exists()
         assert target.read_text(encoding="utf-8") == "print('agent core')"
+
+    def test_agent_core_events_recover_when_cursor_is_ahead_of_stream(
+        self, tmp_path
+    ):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        client.post(
+            "/agent-core/tasks",
+            json={"message": "Explain the architecture"},
+        )
+
+        response = client.get(
+            "/agent-core/events",
+            params={"after": 99},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "events": [
+                {"type": "status", "text": "step 1 of 20"},
+                {"type": "message", "text": "Done"},
+            ],
+            "next": 2,
+        }
+
+    def test_agent_execution_logs_elapsed_time(self, caplog):
+        import logging
+
+        from app.events import EventStream
+        from web.app import _run_agent_safely
+
+        class StubAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                events.publish("message", "Done")
+
+        with caplog.at_level(logging.INFO, logger="web.app"):
+            _run_agent_safely(
+                StubAgent(),
+                "Test timing",
+                EventStream(),
+            )
+
+        assert "Agent execution finished" in caplog.text
+        assert "seconds" in caplog.text
 
 
 
