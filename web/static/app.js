@@ -185,20 +185,33 @@ function appendChatMessage(log, speaker, text, persist, time, tags, basis) {
 }
 
 async function postJson(url, body) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
-    const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({}));
 
-    if (!response.ok) {
-      throw new Error(data.detail || "Request failed.");
-    }
-
-    return data;
+  if (!response.ok) {
+    throw new Error(data.detail || "Request failed.");
   }
+
+  return data;
+}
+
+async function requestAI(capability, input, context = null) {
+  const body = {
+    capability,
+    input,
+  };
+
+  if (context !== null) {
+    body.context = context;
+  }
+
+  return postJson("/ai/request", body);
+}
 
   // Current end of an event stream, so a new view never replays old events.
   async function latestCursor(url) {

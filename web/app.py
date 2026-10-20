@@ -114,7 +114,10 @@ class StackAdviceRequest(BaseModel):
     description: str
     project_id: str = "default"
 
-
+class AIRequest(BaseModel):
+    capability: str
+    input: dict = Field(default_factory=dict)
+    context: dict | None = None
 # ---------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------
@@ -423,6 +426,7 @@ def create_app(
     agent_core=None,
     approval_manager=None,
     stack_advisor=None,
+    ai_capabilities=None,
 ):
     web_app = FastAPI()
 
@@ -445,6 +449,40 @@ def create_app(
     @web_app.get("/")
     def page():
         return FileResponse(PAGE)
+
+    # -----------------------------------------------------
+    # Shared AI interface
+    # -----------------------------------------------------
+
+    @web_app.post("/ai/request")
+    def shared_ai_request(request: AIRequest):
+        if not request.capability.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Capability is required.",
+            )
+
+        if ai_capabilities is None:
+            raise HTTPException(
+                status_code=503,
+                detail="AI capabilities are not configured.",
+            )
+
+        try:
+            result = ai_capabilities.execute(
+                request.capability,
+                request.input,
+                context=request.context,
+            )
+            return {"result": result}
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="The AI capability request failed.",
+            ) from exc
 
     # -----------------------------------------------------
     # Technology stack recommendations

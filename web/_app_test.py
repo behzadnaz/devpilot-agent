@@ -269,6 +269,30 @@ class _AppTest:
             "approved": False,
         }
 
+    def test_shared_ai_api_returns_502_when_capability_fails(self):
+        class FailingAICapabilities:
+            def execute(self, capability, inputs, context=None):
+                raise RuntimeError("Internal AI failure")
+
+        client = TestClient(
+            create_app(ai_capabilities=FailingAICapabilities())
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == (
+            "The AI capability request failed."
+        )
+
     def test_approval_endpoint_resolves_pending_request(self):
         manager = ApprovalManager()
         request_id = manager.create_request(
@@ -572,6 +596,24 @@ class _AppTest:
         assert "another-project" in registry.projects
         assert not project_folder.exists()
         assert another_folder.is_dir()
+
+    def test_shared_ai_api_returns_503_when_capabilities_are_missing(self):
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == (
+            "AI capabilities are not configured."
+        )
 
     def test_delete_project_moves_folder_to_recycle_bin_and_removes_it_from_explore(
         self, tmp_path, monkeypatch
@@ -936,6 +978,149 @@ class _AppTest:
         assert response.status_code == 200
         assert advisor.description == "Build an online bookstore"
         assert advisor.project_path == project_path.resolve()
+
+    def test_shared_ai_api_forwards_context_to_capability(self):
+        class FakeAICapabilities:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, capability, inputs, context=None):
+                self.calls.append(
+                    {
+                        "capability": capability,
+                        "inputs": inputs,
+                        "context": context,
+                    }
+                )
+                return {"answer": "Recommendation based on context"}
+
+        capabilities = FakeAICapabilities()
+        client = TestClient(
+            create_app(ai_capabilities=capabilities)
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+                "context": {
+                    "project_id": "bookstore",
+                    "current_component": "technology-stack",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {
+                "answer": "Recommendation based on context"
+            }
+        }
+        assert capabilities.calls[0]["context"] == {
+            "project_id": "bookstore",
+            "current_component": "technology-stack",
+        }
+
+    def test_shared_ai_api_does_not_start_project_or_agent_core_tasks(self):
+        class FakeAICapabilities:
+            def execute(self, capability, inputs, context=None):
+                return {"handled_by": "shared-capability"}
+
+        class FakeAgent:
+            def __init__(self):
+                self.calls = []
+
+            def run(self, message, events, **kwargs):
+                self.calls.append(message)
+
+        project_agent = FakeAgent()
+        agent_core = FakeAgent()
+
+        client = TestClient(
+            create_app(
+                agent=project_agent,
+                agent_core=agent_core,
+                ai_capabilities=FakeAICapabilities(),
+            )
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {"description": "Build a bookstore"},
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {"handled_by": "shared-capability"}
+        }
+        assert project_agent.calls == []
+        assert agent_core.calls == []
+
+    def test_shared_ai_api_routes_request_to_requested_capability(self):
+        class FakeAICapabilities:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, capability, inputs, context=None):
+                self.calls.append(
+                    {
+                        "capability": capability,
+                        "inputs": inputs,
+                        "context": context,
+                    }
+                )
+                return {
+                    "recommendations": [
+                        {
+                            "stack": "FastAPI + PostgreSQL",
+                            "reason": "Suitable for the described application.",
+                        }
+                    ]
+                }
+
+        capabilities = FakeAICapabilities()
+        client = TestClient(
+            create_app(ai_capabilities=capabilities)
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {
+                "recommendations": [
+                    {
+                        "stack": "FastAPI + PostgreSQL",
+                        "reason": "Suitable for the described application.",
+                    }
+                ]
+            }
+        }
+        assert capabilities.calls == [
+            {
+                "capability": "stack-recommendations",
+                "inputs": {
+                    "description": "Build an online bookstore"
+                },
+                "context": None,
+            }
+        ]
+
+
 
 
 
