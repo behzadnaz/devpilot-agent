@@ -1,3 +1,4 @@
+import logging
 from app._llm_stub import _LLMStub, final_message, tool_call
 from app.agent_loop import AgentLoop
 from app.events import Event, EventStream
@@ -214,7 +215,6 @@ class _AgentLoopTest:
 
         assert not target.exists()
 
-
     def test_step_limit_publishes_failure_status_and_message(self, tmp_path):
         loop, llm = _new_loop(
             tmp_path,
@@ -231,3 +231,35 @@ class _AgentLoopTest:
         assert published[-2] == Event("status", "failed")
         assert published[-1].type == "message"
         assert "step limit" in published[-1].text.lower()
+
+    def test_tool_execution_logs_elapsed_time(self, tmp_path, caplog):
+        loop, _ = _new_loop(
+            tmp_path,
+            [
+                tool_call("list_files"),
+                final_message("Done."),
+            ],
+        )
+
+        with caplog.at_level(logging.INFO):
+            loop.run("List the project files", EventStream())
+
+        assert "Tool execution finished" in caplog.text
+        assert "seconds" in caplog.text
+
+    def test_agent_loop_logs_total_elapsed_time_and_step_count(
+            self, tmp_path, caplog
+    ):
+        import logging
+
+        loop, _ = _new_loop(
+            tmp_path,
+            [final_message("Done.")],
+        )
+
+        with caplog.at_level(logging.INFO):
+            loop.run("Say hello", EventStream())
+
+        assert "Agent loop finished" in caplog.text
+        assert "steps=1" in caplog.text
+        assert "seconds" in caplog.text

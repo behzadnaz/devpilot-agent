@@ -121,6 +121,14 @@
   <main class="shell">
     <div id="banner" class="banner" role="alert" hidden></div>
 
+    <section id="approvalPanel" class="approval-panel" hidden aria-labelledby="approvalTitle">
+      <h2 id="approvalTitle">Approval required</h2>
+      <p>DevPilot is waiting for your decision before executing an action.</p>
+      <div id="approvalRequests" aria-live="polite"></div>
+      <p id="approvalStatus" class="chat-status" role="status"></p>
+    </section>
+
+
     <div class="work-area">
       <nav class="dock" id="dock" hidden aria-label="Minimized panels"></nav>
 

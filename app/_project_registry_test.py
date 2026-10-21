@@ -130,7 +130,6 @@ class _ProjectRegistryTest:
         assert development_agent["path"] == "projects/development"
         assert len(created_agents) == 2
 
-
     def test_registry_can_add_and_list_projects(self, tmp_path):
         registry = ProjectRegistry({
             "devpilot": {
@@ -171,5 +170,64 @@ class _ProjectRegistryTest:
             )
 
         assert registry.get_config("my-project")["path"] == tmp_path / "original"
+
+
+    def test_registry_restores_projects_after_recreation(self, tmp_path):
+        persistence_file = tmp_path / "projects.json"
+        project_path = tmp_path / "my-project"
+        project_path.mkdir()
+
+        registry = ProjectRegistry(
+            {
+                "default": {
+                    "path": str(tmp_path),
+                    "workflow": "development",
+                },
+            },
+            persistence_path=persistence_file,
+        )
+
+        registry.add_project(
+            "my-project",
+            {
+                "path": str(project_path),
+                "workflow": "planning",
+            },
+        )
+
+        # Simulate restarting the application.
+        restored_registry = ProjectRegistry(
+            {
+                "default": {
+                    "path": str(tmp_path),
+                    "workflow": "development",
+                },
+            },
+            persistence_path=persistence_file,
+        )
+
+        assert "my-project" in restored_registry.list_projects()
+        assert restored_registry.get_config("my-project") == {
+            "path": str(project_path),
+            "workflow": "planning",
+        }
+
+    def test_registry_persists_project_removal(self, tmp_path):
+        persistence_file = tmp_path / "projects.json"
+
+        registry = ProjectRegistry(
+            {"my-project": {"path": str(tmp_path), "workflow": "development"}},
+            persistence_path=persistence_file,
+        )
+
+        registry.remove_project("my-project")
+
+        restored_registry = ProjectRegistry(
+            {"my-project": {"path": str(tmp_path), "workflow": "development"}},
+            persistence_path=persistence_file,
+        )
+
+        assert "my-project" not in restored_registry.list_projects()
+
 
 

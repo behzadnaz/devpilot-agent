@@ -134,8 +134,8 @@ class ToolSet:
             return f"Error: {error}"
 
 
+
     def run_command(self, command):
-        # Require approval before attempting to install dependencies.
         parts = command.split()
         is_install_command = (
             len(parts) >= 2
@@ -143,13 +143,7 @@ class ToolSet:
             and parts[1].lower() == "install"
         )
 
-        if is_install_command:
-            if not self._approval(
-                "install_dependency",
-                {"command": command},
-            ):
-                return "Error: approval denied for dependency installation"
-
+        # Check the allowlist before requesting approval.
         if not self._limits.allows(command):
             allowed = ", ".join(self._limits.allowed_commands) or "none"
             return (
@@ -157,9 +151,25 @@ class ToolSet:
                 f"Allowed commands: {allowed}"
             )
 
+        # Require approval before executing any allowed command.
+        if is_install_command:
+            approved = self._approval(
+                "install_dependency",
+                {"command": command},
+            )
+            if not approved:
+                return "Error: approval denied for dependency installation"
+        else:
+            approved = self._approval(
+                "run_command",
+                {"command": command},
+            )
+            if not approved:
+                return "Error: approval denied for command execution"
+
         try:
             done = subprocess.run(
-                command.split(),
+                parts,
                 cwd=self._root,
                 capture_output=True,
                 text=True,
@@ -175,3 +185,4 @@ class ToolSet:
             )
         except Exception as error:
             return f"Error: {error}"
+

@@ -8,6 +8,12 @@ const agentCoreMessage = $("agentCoreMessage");
 const sendAgentCore = $("sendAgentCore");
 const agentCoreStatus = $("agentCoreStatus");
 const banner = $("banner");
+const approvalPanel = $("approvalPanel");
+const approvalRequests = $("approvalRequests");
+const approvalStatus = $("approvalStatus");
+
+let lastApprovalSignature = "";
+let approvalsPolling = false;
 
 let agentCoreNext = 0;
 let failures = 0;
@@ -198,6 +204,91 @@ async function postJson(url, body) {
   }
 
   return data;
+}
+
+
+function renderApprovalRequests(requests) {
+  const signature = JSON.stringify(requests);
+
+  if (signature === lastApprovalSignature) return;
+  lastApprovalSignature = signature;
+
+  approvalRequests.replaceChildren();
+  approvalPanel.hidden = requests.length === 0;
+
+  requests.forEach(request => {
+    const card = document.createElement("article");
+    card.className = "approval-request";
+
+    const heading = document.createElement("h3");
+    heading.textContent = request.action.replaceAll("_", " ");
+    card.appendChild(heading);
+
+    const details = document.createElement("pre");
+    details.textContent = JSON.stringify(request.details, null, 2);
+    card.appendChild(details);
+
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+
+    const approveButton = document.createElement("button");
+    approveButton.type = "button";
+    approveButton.textContent = "Approve";
+
+    const rejectButton = document.createElement("button");
+    rejectButton.type = "button";
+    rejectButton.textContent = "Reject";
+    rejectButton.className = "secondary";
+
+    async function decide(approved) {
+      approveButton.disabled = true;
+      rejectButton.disabled = true;
+      approvalStatus.textContent = "Submitting decision...";
+
+      try {
+        await postJson(
+          `/approvals/${encodeURIComponent(request.request_id)}`,
+          { approved }
+        );
+
+        approvalStatus.textContent = approved
+          ? "Approval submitted."
+          : "Rejection submitted.";
+
+        lastApprovalSignature = "";
+        await pollApprovals();
+      } catch (error) {
+        approvalStatus.textContent =
+          "Could not submit the decision. Please try again.";
+        approveButton.disabled = false;
+        rejectButton.disabled = false;
+      }
+    }
+
+    approveButton.addEventListener("click", () => decide(true));
+    rejectButton.addEventListener("click", () => decide(false));
+
+    actions.append(approveButton, rejectButton);
+    card.appendChild(actions);
+    approvalRequests.appendChild(card);
+  });
+}
+
+async function pollApprovals() {
+  if (approvalsPolling) return;
+  approvalsPolling = true;
+
+  try {
+    const response = await fetch("/approvals");
+    if (!response.ok) throw new Error("Could not load approvals");
+
+    const data = await response.json();
+    renderApprovalRequests(data.requests || []);
+  } catch (error) {
+    // Keep the UI usable if a temporary polling request fails.
+  } finally {
+    approvalsPolling = false;
+  }
 }
 
 async function requestAI(capability, input, context = null) {
@@ -2261,6 +2352,9 @@ splitters.forEach((splitter, index) => {
 applyLayout();
 
 window.addEventListener("beforeunload", event => { if (running) event.preventDefault(); });
+
+pollApprovals();
+setInterval(pollApprovals, 1000);
 
 async function init() {
   buildTabs();

@@ -44,3 +44,16 @@ class _LLMClientTest:
         assert ollama_client.tools_called_with == tools, "the tools are sent"
         assert message.tool_calls[0].function.name == "read_file", "tool name"
         assert message.tool_calls[0].function.arguments == {"path": "hello.py"}, "arguments"
+
+    def test_chat_logs_elapsed_time(self, caplog):
+        import logging
+
+        ollama_client = _OllamaClientStub(reply="Hello")
+        client = LLMClient(SETTINGS, ollama_client)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        with caplog.at_level(logging.INFO):
+            client.chat(messages, [])
+
+        assert "LLM chat finished" in caplog.text
+        assert "seconds" in caplog.text

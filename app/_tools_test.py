@@ -192,7 +192,6 @@ class _ToolSetTest:
         assert "longer than" in result, "the reason"
         assert "stopped" in result, "it was stopped"
 
-
     def test_run_command_is_blocked_when_approval_is_denied(self, tmp_path):
         limits = Limits(
             allowed_commands=("pip install example-package",),
@@ -207,4 +206,24 @@ class _ToolSetTest:
         result = tools.run_command("pip install example-package")
 
         assert "approval" in result.lower()
+
+    def test_run_command_is_blocked_when_general_command_approval_is_denied(self, tmp_path):
+        limits = Limits(
+            allowed_commands=("python destructive.py",),
+            timeout=30,
+        )
+        tools = _new_tools(
+            tmp_path,
+            limits=limits,
+            approval=lambda action, details: False,
+        )
+        (tmp_path / "project" / "destructive.py").write_text(
+            "print('COMMAND EXECUTED')\n"
+        )
+
+        result = tools.run_command("python destructive.py")
+
+        assert "approval" in result.lower()
+        assert "COMMAND EXECUTED" not in result
+
 

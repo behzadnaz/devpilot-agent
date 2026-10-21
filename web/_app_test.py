@@ -450,6 +450,31 @@ class _AppTest:
         assert agent_core.run_mode == "ask"
         assert agent_core.run_tags == ["ask"]
 
+    def test_agent_core_uploads_file(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent_core=_AgentStub(),
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/files",
+            files={
+                "file": (
+                    "notes.txt",
+                    b"The application uses FastAPI.",
+                    "text/plain",
+                )
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"]
+        assert data["name"] == "notes.txt"
+
     def test_project_task_publishes_error_when_agent_crashes(self):
         class FailingAgent:
             def run(self, message, events, mode="ask", tags=None):
@@ -1641,6 +1666,143 @@ class _AppTest:
 
         assert "Agent execution finished" in caplog.text
         assert "seconds" in caplog.text
+
+    def test_project_ask_mode_works_without_existing_workspace(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        llm = _LLMStub([
+            final_message("Ask mode works without a project workspace.")
+        ])
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": workspace,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "What is the difference between a class and an object?",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not workspace.exists()
+
+        events = client.get("/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Ask mode works without a project workspace.",
+        }
+
+    def test_project_change_mode_reports_missing_workspace(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        llm = _LLMStub([
+            final_message("Change Code reached the agent.")
+        ])
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": workspace,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Inspect the project and explain its structure.",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = client.get("/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Change Code reached the agent.",
+        }
+
+    def test_project_ask_mode_handles_missing_workspace_without_listing_files(
+            self, tmp_path
+    ):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        llm = _LLMStub([
+            tool_call("list_files", path="."),
+            final_message("A class defines a type; an object is an instance."),
+        ])
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": workspace,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "What is the difference between a class and an object?",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not workspace.exists()
+
+        events = client.get("/events").json()["events"]
+        tool_results = [
+            event["text"]
+            for event in events
+            if event["type"] == "tool_result"
+        ]
+
+        assert not any("No such file or directory" in result for result in tool_results)
 
 
 

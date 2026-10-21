@@ -1,8 +1,10 @@
-
-from pathlib import Path
+import logging
+import time
+logger = logging.getLogger(__name__)
 
 import ollama
 
+from pathlib import Path
 from app.config import ModelSettings
 
 MODEL_FILE = (
@@ -40,11 +42,17 @@ class LLMClient:
 
     def chat(self, messages, tools):
         """Send messages and tool definitions to the model."""
+        started = time.perf_counter()
+
         response = self._ollama_client.chat(
             model=self._settings.model,
             messages=messages,
             tools=tools,
         )
+
+        elapsed = time.perf_counter() - started
+        logger.info("LLM chat finished in %.3f seconds", elapsed)
+
         return response.message
 
 

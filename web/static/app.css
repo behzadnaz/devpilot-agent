@@ -1001,3 +1001,54 @@ aside.core-panel .core-head { background: var(--core-head); }
   border-color: var(--accent);
   background: var(--card);
 }
+
+.approval-panel {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.approval-panel h2 {
+  margin-top: 0;
+}
+
+.approval-request {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.approval-request h3 {
+  margin-top: 0;
+  text-transform: capitalize;
+}
+
+.approval-request pre {
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.approval-actions button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.approval-panel[hidden] {
+  display: none !important;
+}
