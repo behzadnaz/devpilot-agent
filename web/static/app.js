@@ -1334,7 +1334,6 @@ async function openProjectDialog(mode) {
   // Import uses the workspace path, not the five-step navigation.
   $("wizardBack").hidden = !creating;
   $("wizardNext").hidden = !creating;
-  $("wizardProgress").hidden = !creating;
   dialogCreate.hidden = false;
 
   if (creating) {

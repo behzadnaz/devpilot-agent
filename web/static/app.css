@@ -1119,24 +1119,23 @@ aside.core-panel .core-head { background: var(--core-head); }
   padding: 0 12px 12px;
 }
 
-
-
-/* New Project wizard: match the UI preview's step tabs */
+/* New Project wizard: step tabs */
 #languageBlock.wizard-tabs {
   display: flex !important;
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
   margin: 0 0 18px;
-  padding: 0 4px;
+  padding: 6px;
   overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 1px solid var(--line);
-  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
   scrollbar-width: thin;
 }
 
@@ -1145,17 +1144,17 @@ aside.core-panel .core-head { background: var(--core-head); }
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 6px;
   margin: 0 !important;
   padding: 11px 14px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 10px 10px 0 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   color: var(--muted);
   font-size: 13.5px;
   font-weight: 600;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 #languageBlock > .wizard-tab .icon {
@@ -1403,7 +1402,7 @@ dialog.project-wizard {
 }
 
 #languageBlock > .wizard-tab[data-status="in-progress"]::after {
-  background: #eab308;
+  background: #c2410c;
 }
 
 #languageBlock > .wizard-tab[data-status="completed"]::after {
@@ -1952,5 +1951,300 @@ dialog.project-wizard {
     margin-left: 0;
   }
 }
+/* Completed wizard steps */
+#languageBlock > .wizard-tab[data-status="completed"] .step-number,
+#languageBlock > .wizard-tab[data-status="completed"] .step-status,
+#languageBlock > .wizard-tab[data-status="completed"] .step-title {
+  color: #22a06b;
+}
+
+#languageBlock > .wizard-tab[data-status="completed"]::after {
+  background: #22a06b;
+}
+
+#languageBlock > .wizard-tab.active[data-status="completed"] {
+  background: var(--accent-soft);
+  border-color: #22a06b;
+}
+
+#languageBlock > .wizard-tab.active[data-status="completed"] .step-title {
+  color: #22a06b;
+}
+
+
+/* Active wizard tab: use the existing theme colors */
+#languageBlock > .wizard-tab.active {
+  background: var(--surface-hover, var(--surface));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+  position: relative;
+  z-index: 1;
+}
+
+/* Keep the selected tab prominent in both themes */
+#languageBlock > .wizard-tab.active .step-number,
+#languageBlock > .wizard-tab.active .step-title,
+#languageBlock > .wizard-tab.active .step-status {
+  color: var(--accent);
+}
+
+/* Completed tabs remain green but less prominent */
+#languageBlock > .wizard-tab[data-status="completed"]:not(.active) {
+  box-shadow: none;
+}
+
+#languageBlock > .wizard-tab[data-status="completed"]:not(.active) .step-number,
+#languageBlock > .wizard-tab[data-status="completed"]:not(.active) .step-title,
+#languageBlock > .wizard-tab[data-status="completed"]:not(.active) .step-status {
+  opacity: 0.7;
+}
+
+
+/* Project wizard introduction */
+
+/* Project wizard introduction — compact spacing */
+.wizard-intro {
+  padding: 10px 14px;
+  margin: 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.wizard-intro > h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.wizard-intro-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.wizard-intro-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--soft);
+}
+
+.wizard-intro-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.wizard-intro-heading > div {
+  min-width: 0;
+}
+
+.wizard-intro-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.wizard-intro-heading p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.wizard-intro-description {
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+@media (max-width: 520px) {
+  .wizard-intro {
+    padding: 9px 10px;
+  }
+
+  .wizard-intro-heading {
+    gap: 8px;
+  }
+
+  .wizard-intro-icon {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+}
+
+
+/* New Project wizard: white tabs with darker text and icons */
+#languageBlock.wizard-tabs {
+  background: #ffffff;
+  border-color: #d1d5db;
+}
+
+#languageBlock > .wizard-tab {
+  background: #ffffff;
+  color: #374151;
+  border-color: transparent;
+}
+
+#languageBlock > .wizard-tab:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+#languageBlock > .wizard-tab.active {
+  background: #ffffff;
+  color: #111827;
+  border-color: #9ca3af;
+  font-weight: 700;
+}
+
+#languageBlock > .wizard-tab svg,
+#languageBlock > .wizard-tab i {
+  color: currentColor;
+}
+
+
+
+/* New Project wizard: dark orange in-progress status */
+#languageBlock > .wizard-tab[data-status="in-progress"] .step-status,
+#languageBlock > .wizard-tab[data-status="in-progress"] .step-status svg,
+#languageBlock > .wizard-tab[data-status="in-progress"] .step-status i {
+  color: #c2410c !important;
+}
+
+#languageBlock > .wizard-tab[data-status="in-progress"] .step-status svg {
+  stroke: #c2410c !important;
+}
+
+
+/* Dark orange for the in-progress step number */
+#languageBlock > .wizard-tab[data-status="in-progress"] .step-number {
+  color: #c2410c !important;
+  border-color: #c2410c !important;
+}
+
+
+/* Keep the close button outside the header's description panel */
+#projectDialog.project-wizard {
+  position: relative;
+}
+
+#projectDialog.project-wizard .wizard-header {
+  position: static;
+}
+
+#projectDialog.project-wizard .dialog-x {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 100;
+}
+
+#projectDialog.project-wizard .wizard-intro {
+  padding-right: 44px;
+}
+
+
+/* New Project wizard header layout */
+#projectDialog.project-wizard .wizard-header {
+  position: relative;
+  display: block;
+  padding-right: 0;
+}
+
+#projectDialog.project-wizard .wizard-intro {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 52px 0 0;
+}
+
+#projectDialog.project-wizard .dialog-x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 10;
+  margin: 0;
+}
+
+
+/* Remove the panel around the New Project heading and description */
+#projectDialog.project-wizard .wizard-intro {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
+  padding: 0 52px 0 0 !important;
+}
+
+/* New Project wizard tabs: restore dark background in dark mode */
+:root[data-theme="dark"] #languageBlock.wizard-tabs {
+  background: var(--card);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] #languageBlock > .wizard-tab {
+  background: transparent;
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] #languageBlock > .wizard-tab:hover {
+  background: var(--soft);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] #languageBlock > .wizard-tab.active {
+  background: var(--card);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+
+/* New Project wizard: 3D selected-tab effect */
+#languageBlock > .wizard-tab {
+  position: relative;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+#languageBlock > .wizard-tab:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.18);
+}
+
+#languageBlock > .wizard-tab.active {
+  transform: translateY(-2px);
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.16),
+    0 5px 10px rgba(0, 0, 0, 0.12);
+  font-weight: 700;
+  z-index: 1;
+}
+
+#languageBlock > .wizard-tab.active:active {
+  transform: translateY(0);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.18);
+}
+
+/* Hide step numbers in wizard content, but keep them in navigation tabs */
+#projectDialog .wizard-content .step-number {
+  display: none !important;
+}
+
+
+
+
 
 
