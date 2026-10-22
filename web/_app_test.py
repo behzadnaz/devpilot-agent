@@ -116,10 +116,37 @@ class _AppTest:
         response = client.get("/projects")
 
         assert response.status_code == 200
+
         assert response.json() == {
             "projects": [
-                {"id": "devpilot", "workflow": "development"},
-                {"id": "my-project", "workflow": "planning"},
+                {
+                    "id": "devpilot",
+                    "workflow": "development",
+                    "summary": "",
+                    "stack": "",
+                    "app_type": "web",
+                    "frontend_stack": "",
+                    "backend_stack": "",
+                    "database_stack": "",
+                    "testing_stack": "",
+                    "security_stack": "",
+                    "deployment_stack": "",
+                    "scaling_stack": "",
+                },
+                {
+                    "id": "my-project",
+                    "workflow": "planning",
+                    "summary": "",
+                    "stack": "",
+                    "app_type": "web",
+                    "frontend_stack": "",
+                    "backend_stack": "",
+                    "database_stack": "",
+                    "testing_stack": "",
+                    "security_stack": "",
+                    "deployment_stack": "",
+                    "scaling_stack": "",
+                },
             ]
         }
 
@@ -157,6 +184,165 @@ class _AppTest:
             registry.projects["my-new-project"]["path"]
             == chosen_folder.resolve()
         )
+
+
+    def test_creates_project_in_new_directory_with_summary_and_stack(
+        self, tmp_path
+    ):
+        chosen_folder = (
+            tmp_path / "Documents" / "ClinicBooking"
+        )
+
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=tmp_path / "DevPilot-Workspace",
+            )
+        )
+
+        assert not chosen_folder.exists()
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "clinic-booking",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A booking website for a small clinic.",
+                "stack": "Python + FastAPI",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert chosen_folder.is_dir()
+
+        saved = registry.projects["clinic-booking"]
+        assert saved["path"] == chosen_folder.resolve()
+        assert saved["summary"] == (
+            "A booking website for a small clinic."
+        )
+        assert saved["stack"] == "Python + FastAPI"
+
+
+    def test_language_check_reports_python_runtime(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get(
+            "/languages/check",
+            params={"stack": "Python + FastAPI"},
+        )
+
+        assert response.status_code == 200, response.text
+
+        result = response.json()
+        assert result["runtime"] == "Python"
+        assert isinstance(result["installed"], bool)
+        assert "version" in result
+        assert result["no_install"] is False
+
+    def test_language_check_does_not_require_runtime_for_html_css(
+        self, tmp_path
+    ):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get(
+            "/languages/check",
+            params={"stack": "HTML + CSS"},
+        )
+
+        assert response.status_code == 200, response.text
+
+        result = response.json()
+        assert result["no_install"] is True
+        assert result["installed"] is True
+
+    def test_creates_python_fastapi_starter_files_without_installing_dependencies(
+        self, tmp_path
+    ):
+        chosen_folder = tmp_path / "ClinicBooking"
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=tmp_path / "DevPilot-Workspace",
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "clinic-booking",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A booking website for a small clinic.",
+                "stack": "Python + FastAPI",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "pyproject.toml").is_file()
+        assert (chosen_folder / "main.py").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        pyproject = (chosen_folder / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+        main_py = (chosen_folder / "main.py").read_text(
+            encoding="utf-8"
+        )
+        readme = (chosen_folder / "README.md").read_text(
+            encoding="utf-8"
+        )
+
+        assert "fastapi" in pyproject.lower()
+        assert "uvicorn" in pyproject.lower()
+        assert "FastAPI" in main_py
+        assert "A booking website for a small clinic." in readme
+        assert "Python + FastAPI" in readme
+
+    def test_creates_python_starter_files_when_stack_is_python(self, tmp_path):
+        chosen_folder = tmp_path / "PythonProject"
+        registry = _ProjectRegistryStub()
+
+        client = TestClient(
+            create_app(
+                agent=_AgentStub(),
+                start=lambda *args, **kwargs: None,
+                project_registry=registry,
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "python-project",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A simple Python application.",
+                "stack": "Python",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "main.py").exists()
+        assert (chosen_folder / "pyproject.toml").exists()
+        assert (chosen_folder / "README.md").exists()
 
     def test_duplicate_project_creation_returns_conflict(self, tmp_path):
         registry = _ProjectRegistryStub(
@@ -1804,9 +1990,86 @@ class _AppTest:
 
         assert not any("No such file or directory" in result for result in tool_results)
 
+    def test_create_project_saves_summary_and_stack(self, tmp_path):
+        folder = tmp_path / "MyNewProject"
+        folder.mkdir()
 
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+            )
+        )
 
+        response = client.post(
+            "/projects",
+            json={
+                "id": "my-new-project",
+                "path": str(folder),
+                "workflow": "software_development",
+                "summary": "A booking website for a small clinic.",
+                "stack": "Python + FastAPI",
+                "app_type": "web",
+                "frontend_stack": "React",
+                "backend_stack": "Python + FastAPI",
+                "database_stack": "PostgreSQL",
+                "testing_stack": "pytest + Playwright",
+                "security_stack": "Environment variables + OAuth",
+                "deployment_stack": "Docker + CI/CD",
+                "scaling_stack": "Caching + background workers",
+            },
+        )
 
+        assert response.status_code == 201, response.text
 
+        saved = registry.projects["my-new-project"]
+        assert saved["summary"] == "A booking website for a small clinic."
+        assert saved["stack"] == "Python + FastAPI"
+        assert saved["app_type"] == "web"
+        assert saved["frontend_stack"] == "React"
+        assert saved["backend_stack"] == "Python + FastAPI"
+        assert saved["database_stack"] == "PostgreSQL"
+        assert saved["testing_stack"] == "pytest + Playwright"
+        assert saved["security_stack"] == "Environment variables + OAuth"
+        assert saved["deployment_stack"] == "Docker + CI/CD"
+        assert saved["scaling_stack"] == "Caching + background workers"
 
+    def test_lists_project_summary_and_stack(self, tmp_path):
+        registry = _ProjectRegistryStub(
+            projects={
+                "clinic-booking": {
+                    "workflow": "software_development",
+                    "summary": "A booking website for a small clinic.",
+                    "stack": "Python + FastAPI",
+                    "app_type": "web",
+                    "frontend_stack": "React",
+                    "backend_stack": "Python + FastAPI",
+                    "database_stack": "PostgreSQL",
+                    "testing_stack": "pytest + Playwright",
+                    "security_stack": "Environment variables + OAuth",
+                    "deployment_stack": "Docker + CI/CD",
+                    "scaling_stack": "Caching + background workers",
+                    "path": tmp_path / "clinic-booking",
+                }
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
 
+        response = client.get("/projects")
+
+        assert response.status_code == 200
+        project = response.json()["projects"][0]
+        assert project["id"] == "clinic-booking"
+        assert project["summary"] == "A booking website for a small clinic."
+        assert project["stack"] == "Python + FastAPI"
+        assert project["app_type"] == "web"
+        assert project["frontend_stack"] == "React"
+        assert project["backend_stack"] == "Python + FastAPI"
+        assert project["database_stack"] == "PostgreSQL"
+        assert project["testing_stack"] == "pytest + Playwright"
+        assert project["security_stack"] == "Environment variables + OAuth"
+        assert project["deployment_stack"] == "Docker + CI/CD"
+        assert project["scaling_stack"] == "Caching + background workers"

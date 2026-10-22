@@ -6,10 +6,9 @@ import threading
 import logging
 import time
 import uuid
+from pathlib import Path
 
 import ollama
-
-from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -125,6 +124,16 @@ class ProjectRequest(BaseModel):
     id: str
     path: str
     workflow: str
+    summary: str = ""
+    stack: str = ""
+    app_type: str = "web"
+    frontend_stack: str = ""
+    backend_stack: str = ""
+    database_stack: str = ""
+    testing_stack: str = ""
+    security_stack: str = ""
+    deployment_stack: str = ""
+    scaling_stack: str = ""
     tags: list[str] = Field(default_factory=list)
 
 
@@ -243,7 +252,6 @@ def _read_agent_core_attachments(request, uploads):
     """Read supported text uploads and append them to the task prompt."""
     attachment_sections = []
 
-    # Deduplicate IDs while preserving their order.
     file_ids = list(dict.fromkeys(request.file_ids))
 
     for file_id in file_ids:
@@ -434,7 +442,6 @@ Each object must contain:
             "Ollama returned an empty response for stack recommendations."
         )
 
-    # Allow responses wrapped in Markdown code fences.
     if response.startswith("```"):
         lines = response.splitlines()
 
@@ -446,7 +453,6 @@ Each object must contain:
 
         response = "\n".join(lines).strip()
 
-    # Recover a JSON array if the model added surrounding prose.
     if not response.startswith("["):
         start = response.find("[")
         end = response.rfind("]")
@@ -604,6 +610,78 @@ def select_folder_dialog():
 
 
 # ---------------------------------------------------------
+# Python + FastAPI starter files
+# ---------------------------------------------------------
+
+def create_python_fastapi_starter_files(
+    project_path: Path,
+    summary: str,
+) -> list[Path]:
+    """Create a minimal FastAPI starter without installing dependencies."""
+
+    files = {
+        "pyproject.toml": (
+            '[project]\n'
+            'name = "devpilot-project"\n'
+            'version = "0.1.0"\n'
+            'description = "A starter application created by DevPilot"\n'
+            'requires-python = ">=3.10"\n'
+            'dependencies = [\n'
+            '    "fastapi>=0.115",\n'
+            '    "uvicorn[standard]>=0.30",\n'
+            ']\n'
+        ),
+        "main.py": (
+            "from fastapi import FastAPI\n\n"
+            'app = FastAPI(title="DevPilot Project")\n\n\n'
+            '@app.get("/")\n'
+            "def read_root():\n"
+            '    return {"message": "Welcome to your new project"}\n'
+        ),
+        "README.md": (
+            "# Python + FastAPI Project\n\n"
+            f"{summary}\n\n"
+            "## Run locally\n\n"
+            "Install the dependencies in your chosen Python environment, "
+            "then run:\n\n"
+            "```powershell\n"
+            "python -m uvicorn main:app --reload\n"
+            "```\n\n"
+            "Dependencies are not installed automatically by DevPilot.\n"
+        ),
+    }
+
+    created_files = []
+
+    try:
+        for filename, content in files.items():
+            file_path = project_path / filename
+
+            # Exclusive creation prevents overwriting existing files.
+            with file_path.open(
+                "x",
+                encoding="utf-8",
+                newline="\n",
+            ) as file:
+                file.write(content)
+
+            created_files.append(file_path)
+
+    except Exception:
+        for file_path in reversed(created_files):
+            try:
+                file_path.unlink()
+            except OSError:
+                logger.warning(
+                    "Could not remove incomplete starter file: %s",
+                    file_path,
+                )
+        raise
+
+    return created_files
+
+
+# ---------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------
 
@@ -632,7 +710,6 @@ def create_app(
     project_stream = EventStream()
     agent_core_stream = EventStream()
 
-    # Uploaded file metadata is scoped to this application instance.
     web_app.state.agent_core_uploads = {}
 
     upload_root = (
@@ -650,7 +727,10 @@ def create_app(
     def page():
         return FileResponse(PAGE)
 
+    # -----------------------------------------------------
     # Shared AI interface
+    # -----------------------------------------------------
+
     @web_app.post("/ai/request")
     def shared_ai_request(request: AIRequest):
         if not request.capability.strip():
@@ -681,7 +761,114 @@ def create_app(
                 detail="The AI capability request failed.",
             ) from exc
 
+
+    # -----------------------------------------------------
+    # Runtime availability checks
+    # -----------------------------------------------------
+
+    @web_app.get("/languages/check")
+    def check_language_runtime(stack: str = ""):
+        import shutil
+        import subprocess
+
+        normalized_stack = stack.strip().lower()
+
+        # Static frontend projects don't require a language runtime.
+        if normalized_stack in {
+            "html + css",
+            "html/css",
+            "html",
+            "css",
+            "html + css + javascript",
+        }:
+            return {
+                "runtime": "None",
+                "installed": True,
+                "version": None,
+                "no_install": True,
+            }
+
+        # Map the selected stack to its runtime executable.
+        if "python" in normalized_stack or "fastapi" in normalized_stack:
+            runtime = "Python"
+            executable = shutil.which("python") or shutil.which("python3")
+            version_args = ["--version"]
+        elif "node" in normalized_stack or "javascript" in normalized_stack or "typescript" in normalized_stack or "react" in normalized_stack or "vue" in normalized_stack or "angular" in normalized_stack or "next.js" in normalized_stack:
+            runtime = "Node.js"
+            executable = shutil.which("node")
+            version_args = ["--version"]
+        elif "java" in normalized_stack or "spring" in normalized_stack:
+            runtime = "Java"
+            executable = shutil.which("java")
+            version_args = ["-version"]
+        elif "go" in normalized_stack or "golang" in normalized_stack:
+            runtime = "Go"
+            executable = shutil.which("go")
+            version_args = ["version"]
+        elif "rust" in normalized_stack:
+            runtime = "Rust"
+            executable = shutil.which("rustc")
+            version_args = ["--version"]
+        elif "php" in normalized_stack or "laravel" in normalized_stack:
+            runtime = "PHP"
+            executable = shutil.which("php")
+            version_args = ["--version"]
+        elif "ruby" in normalized_stack or "rails" in normalized_stack:
+            runtime = "Ruby"
+            executable = shutil.which("ruby")
+            version_args = ["--version"]
+        else:
+            return {
+                "runtime": stack.strip() or "Unknown",
+                "installed": False,
+                "version": None,
+                "no_install": False,
+            }
+
+        if not executable:
+            return {
+                "runtime": runtime,
+                "installed": False,
+                "version": None,
+                "no_install": False,
+            }
+
+        try:
+            result = subprocess.run(
+                [executable, *version_args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+
+            output = (result.stdout or "").strip()
+            if not output:
+                output = (result.stderr or "").strip()
+
+            first_line = output.splitlines()[0] if output else None
+
+            return {
+                "runtime": runtime,
+                "installed": result.returncode == 0,
+                "version": first_line,
+                "no_install": False,
+            }
+
+        except (OSError, subprocess.TimeoutExpired):
+            logger.warning("Could not check runtime %s", runtime)
+
+            return {
+                "runtime": runtime,
+                "installed": False,
+                "version": None,
+                "no_install": False,
+            }
+
+    # -----------------------------------------------------
     # Technology stack recommendations
+    # -----------------------------------------------------
+
     @web_app.post("/stack-advice")
     def get_stack_advice(request: StackAdviceRequest):
         description = request.description.strip()
@@ -730,7 +917,10 @@ def create_app(
                 detail="Could not generate stack recommendations.",
             ) from exc
 
+    # -----------------------------------------------------
     # Workspace
+    # -----------------------------------------------------
+
     @web_app.post("/workspace", status_code=201)
     def create_workspace(request: WorkspaceRequest):
         if projects_root is None:
@@ -780,7 +970,10 @@ def create_app(
 
         return {"path": path}
 
+    # -----------------------------------------------------
     # Projects
+    # -----------------------------------------------------
+
     @web_app.get("/projects")
     def list_projects():
         if project_registry is None:
@@ -796,6 +989,16 @@ def create_app(
                         "workflow",
                         "software-development",
                     ),
+                    "summary": config.get("summary", ""),
+                    "stack": config.get("stack", ""),
+                    "app_type": config.get("app_type", "web"),
+                    "frontend_stack": config.get("frontend_stack", ""),
+                    "backend_stack": config.get("backend_stack", ""),
+                    "database_stack": config.get("database_stack", ""),
+                    "testing_stack": config.get("testing_stack", ""),
+                    "security_stack": config.get("security_stack", ""),
+                    "deployment_stack": config.get("deployment_stack", ""),
+                    "scaling_stack": config.get("scaling_stack", ""),
                 }
                 for project_id, config in sorted(projects.items())
             ]
@@ -812,6 +1015,8 @@ def create_app(
         project_id = request.id.strip()
         raw_path = request.path.strip()
         workflow = request.workflow.strip()
+        summary = request.summary.strip()
+        stack = request.stack.strip()
 
         if not project_id or not raw_path or not workflow:
             raise HTTPException(
@@ -828,12 +1033,67 @@ def create_app(
             )
 
         requested_path = Path(raw_path).expanduser().resolve()
+        created_directory = False
 
-        if not requested_path.exists() or not requested_path.is_dir():
-            raise HTTPException(
-                status_code=400,
-                detail="Project path must be an existing directory.",
-            )
+        if requested_path.exists():
+            if not requested_path.is_dir():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Project path must be a directory.",
+                )
+        else:
+            try:
+                requested_path.mkdir(parents=True, exist_ok=False)
+                created_directory = True
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not create project directory.",
+                ) from exc
+
+        created_files = []
+
+        # Only scaffold the explicitly recognized Python + FastAPI stack.
+        if stack.lower() in {
+            "python",
+            "python + fastapi",
+            "python fastapi",
+            "fastapi",
+        }:
+            try:
+                created_files = create_python_fastapi_starter_files(
+                    requested_path,
+                    summary,
+                )
+            except OSError as exc:
+                if created_directory:
+                    try:
+                        requested_path.rmdir()
+                    except OSError:
+                        logger.warning(
+                            "Could not remove incomplete project directory: %s",
+                            requested_path,
+                        )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not create project starter files.",
+                ) from exc
+            except Exception as exc:
+                if created_directory:
+                    try:
+                        requested_path.rmdir()
+                    except OSError:
+                        logger.warning(
+                            "Could not remove incomplete project directory: %s",
+                            requested_path,
+                        )
+
+                logger.exception("Could not create project starter files")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not create project starter files.",
+                ) from exc
 
         try:
             project_registry.add_project(
@@ -841,12 +1101,64 @@ def create_app(
                 {
                     "path": requested_path,
                     "workflow": workflow,
+                    "summary": summary,
+                    "stack": stack,
+                    "app_type": request.app_type.strip() or "web",
+                    "frontend_stack": request.frontend_stack.strip(),
+                    "backend_stack": request.backend_stack.strip(),
+                    "database_stack": request.database_stack.strip(),
+                    "testing_stack": request.testing_stack.strip(),
+                    "security_stack": request.security_stack.strip(),
+                    "deployment_stack": request.deployment_stack.strip(),
+                    "scaling_stack": request.scaling_stack.strip(),
                 },
             )
         except ValueError as exc:
+            for file_path in reversed(created_files):
+                try:
+                    file_path.unlink()
+                except OSError:
+                    logger.warning(
+                        "Could not remove unregistered starter file: %s",
+                        file_path,
+                    )
+
+            if created_directory:
+                try:
+                    requested_path.rmdir()
+                except OSError:
+                    logger.warning(
+                        "Could not remove unregistered project directory: %s",
+                        requested_path,
+                    )
+
             raise HTTPException(
                 status_code=409,
                 detail=str(exc),
+            ) from exc
+        except Exception as exc:
+            for file_path in reversed(created_files):
+                try:
+                    file_path.unlink()
+                except OSError:
+                    logger.warning(
+                        "Could not remove unregistered starter file: %s",
+                        file_path,
+                    )
+
+            if created_directory:
+                try:
+                    requested_path.rmdir()
+                except OSError:
+                    logger.warning(
+                        "Could not remove unregistered project directory: %s",
+                        requested_path,
+                    )
+
+            logger.exception("Could not register project %s", project_id)
+            raise HTTPException(
+                status_code=500,
+                detail="Could not register project.",
             ) from exc
 
         return {"id": project_id, "workflow": workflow}
@@ -910,7 +1222,10 @@ def create_app(
 
         return {"deleted": project_id}
 
+    # -----------------------------------------------------
     # Project file tree
+    # -----------------------------------------------------
+
     @web_app.get("/tree")
     def project_tree(project_id: str = "default"):
         root = _safe_project_path(project_registry, project_id)
@@ -952,7 +1267,10 @@ def create_app(
 
         return {"files": files}
 
+    # -----------------------------------------------------
     # Read a project file
+    # -----------------------------------------------------
+
     @web_app.get("/file")
     def read_project_file(
         project_id: str = "default",
@@ -986,13 +1304,19 @@ def create_app(
 
         return {"content": content}
 
+    # -----------------------------------------------------
     # Canvas/preview data
+    # -----------------------------------------------------
+
     @web_app.get("/outputs")
     def project_outputs(project_id: str = "default"):
         _safe_project_path(project_registry, project_id)
         return {"preview": None, "story_map": None}
 
+    # -----------------------------------------------------
     # Project AI tasks
+    # -----------------------------------------------------
+
     @web_app.post("/tasks")
     def start_task(request: TaskRequest):
         if not request.message.strip():
@@ -1057,7 +1381,6 @@ def create_app(
                 detail="A filename is required.",
             )
 
-        # Remove any client-supplied directory components.
         filename = Path(
             file.filename.replace("\\", "/")
         ).name
@@ -1109,7 +1432,10 @@ def create_app(
             "name": filename,
         }
 
+    # -----------------------------------------------------
     # Agent Core tasks
+    # -----------------------------------------------------
+
     @web_app.post("/agent-core/tasks")
     def start_agent_core_task(request: AgentCoreRequest):
         if not request.message.strip():
@@ -1124,9 +1450,6 @@ def create_app(
                 detail="Agent Core is not configured.",
             )
 
-        # Resolve uploaded files before starting the background job.
-        # This ensures invalid IDs or unsupported file types return
-        # an HTTP error rather than failing silently in the worker.
         message = _read_agent_core_attachments(
             request,
             web_app.state.agent_core_uploads,
@@ -1160,7 +1483,10 @@ def create_app(
             "next": after + len(found),
         }
 
+    # -----------------------------------------------------
     # Approvals
+    # -----------------------------------------------------
+
     @web_app.get("/approvals")
     def list_pending_approvals():
         return {"requests": approval_manager.pending_requests()}
@@ -1204,7 +1530,6 @@ DEFAULT_PROJECTS = {
         "workflow": "software-development",
     }
 }
-
 
 project_registry = build_project_registry(
     DEFAULT_PROJECTS,

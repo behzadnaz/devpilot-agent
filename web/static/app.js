@@ -1,6 +1,9 @@
 const $ = id => document.getElementById(id);
 const remember = (key, value) => { try { localStorage.setItem(key, value); } catch (e) {} };
 const recall = key => { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } };
+const errorText = (detail, fallback) => Array.isArray(detail)
+  ? (detail.map(d => (d && d.msg) || String(d)).join("; ") || fallback)
+  : ((typeof detail === "string" && detail) || fallback);
 const slugify = name => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const agentCoreLog = $("agentCoreLog");
@@ -200,7 +203,7 @@ async function postJson(url, body) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.detail || "Request failed.");
+    throw new Error(errorText(data.detail, "Request failed."));
   }
 
   return data;
@@ -307,7 +310,7 @@ async function requestAI(capability, input, context = null) {
   // Current end of an event stream, so a new view never replays old events.
   async function latestCursor(url) {
     try {
-      const response = await fetch(url + "?after=0");
+      const response = await fetch(url + (url.includes("?") ? "&" : "?") + "after=0");
       if (!response.ok) return 0;
       const data = await response.json();
       return data.next ?? 0;
@@ -557,7 +560,38 @@ Object.assign(ICONS, {
 });
 
 
+Object.assign(ICONS, {
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/>',
+  restore: '<path d="M9 3v6H3M15 21v-6h6M21 9h-6V3M3 15h6v6"/>',
+  map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  diagram: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><path d="M10 6.5h4a3 3 0 0 1 3 3V14"/>',
+  git: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-3 4-9 5"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  folderopen: '<path d="M3 18.5V6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h6.5A1.5 1.5 0 0 1 20 8.5V10"/><path d="M3 18.5 5.5 11a1.5 1.5 0 0 1 1.4-1H21l-2.6 8.2a1.5 1.5 0 0 1-1.4 1.3H4.5A1.5 1.5 0 0 1 3 18.5z"/>'
+});
+
+function stackIconName(stack) {
+  const name = String(stack || "").toLowerCase();
+
+  if (name.includes("python")) return "python";
+  if (name.includes("react")) return "react";
+  if (name.includes("rust")) return "rust";
+  if (name.includes("javascript") || name.includes("node")) return "javascript";
+  if (name.includes("typescript")) return "typescript";
+  if (name.includes("java")) return "java";
+  if (name.includes("go")) return "go";
+  if (name.includes("docker")) return "docker";
+
+  return "code";
+}
+
 const icon = name => '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+
+function stackIcon(stack) {
+  const name = stackIconName(stack);
+  return icon(ICONS[name] ? name : "code");
+}
 
 function initChrome() {
   const symbols = Object.entries(ICONS)
@@ -579,7 +613,7 @@ function initChrome() {
             ${icon("file")}File${icon("chevron")}
           </button>
           <div class="menu-list" id="fileMenu" hidden>
-            <button id="menuNew" type="button">${icon("plus")}New project</button>
+            <button id="menuNew" type="button"><img src="/static/resources/robot.png" alt="" class="brand-icon">New project</button>
             <button id="menuImport" type="button">${icon("download")}Import project</button>
           </div>
         </div>
@@ -1174,6 +1208,7 @@ function setChatEnabled() {
 }
 
 async function selectProject(id) {
+  if (id === selectedProjectId && running) return;
   if (running && id !== selectedProjectId) {
     if (!confirm('A task is still running in "' + selectedProjectId + '". Stop it and switch to "' + id + '"?')) return;
     try { await postJson("/tasks/stop", { project_id: selectedProjectId }); } catch (e) {}
@@ -1207,7 +1242,9 @@ async function selectProject(id) {
   }
   projectChatStatus.textContent = "";
 
-  projectNext = await latestCursor("/events");
+  const requested = id;
+  projectNext = await latestCursor("/events?project_id=" + encodeURIComponent(id));
+  if (requested !== selectedProjectId) return;
   loadTree();
   loadOutputs("quiet");
   showView("preview");
@@ -1283,9 +1320,26 @@ async function openProjectDialog(mode) {
   dialogMode = mode;
   dialogTitle.innerHTML = icon(mode === "create" ? "plus" : "download") + (mode === "create" ? "New project" : "Import project");
   dialogCreate.lastChild.textContent = mode === "create" ? "Create" : "Import";
-  languageBlock.hidden = mode !== "create";
-  $("nameBlock").hidden = mode !== "create";
-  $("sourceBlock").hidden = mode === "create";
+   const creating = mode === "create";
+
+  languageBlock.hidden = !creating;
+  $("nameBlock").hidden = !creating;
+  $("sourceBlock").hidden = creating;
+
+  // Show the correct content for the selected workflow.
+  projectDialog.querySelectorAll(".wizard-section").forEach(section => {
+    section.hidden = section.dataset.section !== (creating ? "details" : "workspace");
+  });
+
+  // Import uses the workspace path, not the five-step navigation.
+  $("wizardBack").hidden = !creating;
+  $("wizardNext").hidden = !creating;
+  $("wizardProgress").hidden = !creating;
+  dialogCreate.hidden = false;
+
+  if (creating) {
+    projectDialog.showWizardStep(0);
+  }
   $("githubBlock").hidden = true;
   $("githubUrl").value = "";
   $("importPreview").textContent = "";
@@ -1295,14 +1349,35 @@ async function openProjectDialog(mode) {
   projectPath.placeholder = "Choose a project folder";
   document.querySelector('input[name="source"][value="folder"]').checked = true;
   dialogNameInput.value = "";
+  $("projectSummary").value = "";
   idPreview.textContent = "";
   dialogStatus.textContent = "";
   dialogCreate.disabled = false;
   projectPath.value = mode === "create" ? recall("devpilot.folder") : "";
   $("stackInput").value = "";
+    // Reset project architecture selections for each new project.
+  projectDialog.querySelectorAll('input[name="appType"]').forEach(input => {
+    input.checked = input.value === "web";
+  });
+
+  projectDialog.querySelectorAll('input[name="stackSource"]').forEach(input => {
+    input.checked = input.value === "ai";
+  });
+
+  [
+    "frontendStack",
+    "backendStack",
+    "databaseStack",
+    "testingStack",
+    "securityStack",
+    "deploymentStack",
+    "scalingStack",
+  ].forEach(id => {
+    $(id).value = "";
+  });
+
   $("stackCheck").hidden = true;
-  $("stackGuide").hidden = true;
-  $("stackGoal").value = "";
+  updateStackSourceUI();
   $("stackGuideStatus").textContent = "";
   $("stackSuggestions").replaceChildren();
   stackCheckToken++;
@@ -1399,12 +1474,7 @@ async function checkStack() {
 }
 
 // "Not sure?": the user describes the goal and the AI suggests stacks.
-$("askStack").addEventListener("click", event => {
-  event.preventDefault();
-  const guide = $("stackGuide");
-  guide.hidden = !guide.hidden;
-  if (!guide.hidden) $("stackGoal").focus();
-});
+
 
 // Quick suggestions, used when the AI backend cannot answer.
 function localStackAdvice(text) {
@@ -1430,118 +1500,119 @@ function localStackAdvice(text) {
 }
 
 
-function renderStackSuggestions(data) {
+// Shows suggested stacks. Clicking one fills the stack field and checks it on this computer.
+function renderStackSuggestions(items) {
   const list = $("stackSuggestions");
-  const suggestions = Array.isArray(data?.suggestions)
-    ? data.suggestions
-    : [];
-
   list.replaceChildren();
 
-  if (suggestions.length === 0) {
+  if (!items.length) {
     list.textContent = "No recommendations were returned.";
     return;
   }
 
-  suggestions.forEach(item => {
+  for (const item of items) {
     const card = document.createElement("div");
     card.className = "stack-suggestion";
+    card.setAttribute("role", "button");
+    card.tabIndex = 0;
+    card.style.cursor = "pointer";
 
-    const title = document.createElement("h4");
-    title.textContent = item.stack || "Suggested technology stack";
+    const heading = document.createElement("div");
+    heading.className = "stack-suggestion-heading";
+    heading.insertAdjacentHTML("beforeend", stackIcon(item.stack));
+    const title = document.createElement("strong");
+    title.textContent = item.stack;
+    heading.appendChild(title);
+    card.appendChild(heading);
 
-    const reason = document.createElement("p");
-    reason.textContent = item.reason || "";
+    if (item.reason) {
+      const reason = document.createElement("p");
+      reason.textContent = item.reason;
+      card.appendChild(reason);
+    }
 
-    card.append(title, reason);
+    const choose = () => { $("stackInput").value = item.stack; checkStack(); };
+    card.addEventListener("click", choose);
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
+    });
+
     list.appendChild(card);
-  });
+  }
+}
+
+// Accepts the different shapes the backend may return and turns them into { stack, reason }.
+function normalizeStacks(data) {
+  const raw = data?.result?.recommendations || data?.result?.suggestions || data?.recommendations || data?.suggestions || [];
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map(item => typeof item === "string"
+      ? { stack: item.trim(), reason: "" }
+      : {
+          stack: String(item?.stack || item?.name || item?.title || item?.technology || "").trim(),
+          reason: String(item?.reason || item?.description || item?.rationale || "").trim()
+        })
+    .filter(item => item.stack);
 }
 
 async function suggestStacks() {
-  const description = $("stackGoal").value.trim();
+  const description = $("projectSummary").value.trim();
   const status = $("stackGuideStatus");
   const list = $("stackSuggestions");
   const button = $("stackSuggest");
 
   if (!description) {
-    status.textContent = "Describe what you want to build first.";
+    status.textContent = "Fill in the project summary first, then click Recommend stack.";
     return;
   }
 
   button.disabled = true;
-  status.textContent = "Asking Ollama for stack recommendations...";
+  status.textContent = "Asking the AI for stack recommendations...";
   list.replaceChildren();
 
- try {
-  const context = selectedProjectId
-    ? { project_id: selectedProjectId }
-    : null;
+  try {
+    const context = selectedProjectId ? { project_id: selectedProjectId } : null;
+    const data = await requestAI("stack-recommendations", { description }, context);
+    const items = normalizeStacks(data);
 
-  const data = await requestAI("stack-recommendations", { description }, context);
+    if (!items.length) throw new Error("No recommendations were returned.");
 
-  const recommendations = data.result?.recommendations;
-
-    if (!Array.isArray(recommendations) || recommendations.length === 0) {
-      throw new Error("No recommendations were returned.");
-    }
-
-    recommendations.forEach((recommendation) => {
-      const item = document.createElement("div");
-      item.className = "stack-suggestion";
-
-      if (typeof recommendation === "string") {
-        item.textContent = recommendation;
-      } else if (
-        recommendation &&
-        typeof recommendation === "object"
-      ) {
-        const title =
-          recommendation.name ||
-          recommendation.title ||
-          recommendation.stack ||
-          recommendation.technology;
-
-        const details =
-          recommendation.reason ||
-          recommendation.description ||
-          recommendation.rationale;
-
-        if (title) {
-          const heading = document.createElement("strong");
-          heading.textContent = String(title);
-          item.appendChild(heading);
-        }
-
-        if (details) {
-          const paragraph = document.createElement("p");
-          paragraph.textContent = String(details);
-          item.appendChild(paragraph);
-        }
-
-        if (!title && !details) {
-          item.textContent = JSON.stringify(recommendation);
-        }
-      } else {
-        item.textContent = String(recommendation);
-      }
-
-      list.appendChild(item);
-    });
-
-    status.textContent = "Stack recommendations are ready.";
+    renderStackSuggestions(items);
+    status.textContent = "Click a suggestion to use it.";
   } catch (error) {
     console.error("Stack recommendation failed:", error);
-    status.textContent =
-      "Could not get recommendations. Check that Ollama is running and try again.";
+    renderStackSuggestions(localStackAdvice(description));
+    status.textContent = "The AI could not answer, so these are quick suggestions. Click one to use it.";
   } finally {
     button.disabled = false;
   }
 }
 
-
 $("stackSuggest").addEventListener("click", suggestStacks);
-$("stackGoal").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); suggestStacks(); } });
+
+// AI recommendation and manual stack selection share the same editor.
+function updateStackSourceUI() {
+  const source = projectDialog.querySelector('input[name="stackSource"]:checked')?.value || "ai";
+  const aiMode = source === "ai";
+
+  $("stackSuggest").hidden = !aiMode;
+  $("stackGuide").hidden = !aiMode;
+  $("stackInput").placeholder = aiMode
+    ? "Choose an AI recommendation or edit the stack"
+    : "Enter your preferred technologies, e.g. React, FastAPI, PostgreSQL";
+
+  if (!aiMode) {
+    $("stackGuideStatus").textContent = "";
+    $("stackSuggestions").replaceChildren();
+  }
+}
+
+projectDialog.querySelectorAll('input[name="stackSource"]').forEach(input => {
+  input.addEventListener("change", updateStackSourceUI);
+});
+
+
 
 $("newProject").addEventListener("click", () => openProjectDialog("create"));
 $("importProject").addEventListener("click", () => openProjectDialog("import"));
@@ -1581,7 +1652,24 @@ dialogCreate.addEventListener("click", async () => {
   try {
     if (dialogMode === "create") {
       const stack = chosenStack();
-      await postJson("/projects", { id, path, stack: stack.name, workflow: "software_development" });
+
+      await postJson("/projects", {
+        id,
+        path,
+        summary: $("projectSummary").value.trim(),
+        stack: stack.name,
+        workflow: "software_development",
+        app_type:
+          projectDialog.querySelector('input[name="appType"]:checked')?.value || "web",
+        frontend_stack: $("frontendStack").value.trim(),
+        backend_stack: $("backendStack").value.trim(),
+        database_stack: $("databaseStack").value.trim(),
+        testing_stack: $("testingStack").value.trim(),
+        security_stack: $("securityStack").value.trim(),
+        deployment_stack: $("deploymentStack").value.trim(),
+        scaling_stack: $("scalingStack").value.trim(),
+      });
+
       remember("devpilot.folder", path);
     } else {
       await postJson("/projects/import", { id, path: importSource() === "github" ? "" : path, workflow: "software_development", source: importSource(), url: importSource() === "github" ? $("githubUrl").value.trim() : "" });
@@ -1655,7 +1743,7 @@ function renderDiff(text) {
     rejectChanges.disabled = false;
   }
 
-  
+
 function showProjectEvent(event) {
   if (event.type === "status") {
     statusLine.textContent = event.text;
@@ -1731,7 +1819,7 @@ function addStep(event) {
     running = value;
     if (!value) hideTyping(projectLog);
     syncSend();
-    
+
 
     if (value) {
       taskStart = Date.now();
@@ -1790,16 +1878,19 @@ function addStep(event) {
   acceptChanges.addEventListener("click", () => decideChanges("accept"));
   rejectChanges.addEventListener("click", () => decideChanges("reject"));
 
-  
+
 async function pollProject() {
   if (!selectedProjectId || projectPolling) return;
   projectPolling = true;
 
   try {
+    const requested = selectedProjectId;
     const response = await fetch("/events?after=" + projectNext + "&project_id=" + encodeURIComponent(selectedProjectId));
     if (!response.ok) return;
 
     const data = await response.json();
+
+    if (requested !== selectedProjectId) return;
 
     (data.events || []).forEach(showProjectEvent);
     projectNext = data.next ?? projectNext;
@@ -2351,7 +2442,7 @@ splitters.forEach((splitter, index) => {
 
 applyLayout();
 
-window.addEventListener("beforeunload", event => { if (running) event.preventDefault(); });
+window.addEventListener("beforeunload", event => { if (running) { event.preventDefault(); event.returnValue = ""; } });
 
 pollApprovals();
 setInterval(pollApprovals, 1000);
@@ -2367,6 +2458,7 @@ async function init() {
 
   const last = recall("devpilot.project");
   if (last && knownProjects.has(last)) await selectProject(last);
+  else setChatEnabled();
 
   setInterval(tick, 1000);
   setInterval(pollProject, 1000);
