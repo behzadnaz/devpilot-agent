@@ -1,4 +1,4 @@
-﻿
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -11,7 +11,7 @@
   <link rel="icon" type="image/png" href="/resources/robot.png">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
 
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=2020">
 
   <script>
     try {
@@ -189,31 +189,35 @@
           </header>
 
           <div class="pane-body">
-            <div class="panel-head">
-              <h2>
-                <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
-                Projects
-              </h2>
+            <div class="projects-section">
+  <div class="panel-head projects-heading">
+    <h2>
+      <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+      Projects
+    </h2>
 
-              <div class="actions">
-                <button id="newProject" class="secondary" type="button">
-                  <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>
-                  New
-                </button>
-                <button id="importProject" class="secondary" type="button">
-                  <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
-                  Import
-                </button>
-                <button id="refreshProjects" class="secondary icon-only" type="button" aria-label="Refresh projects">
-                  <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
-                </button>
-              </div>
-            </div>
+    <button id="refreshProjects" class="secondary icon-only" type="button" aria-label="Refresh projects">
+      <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+    </button>
+  </div>
 
-            <ul id="projectList" class="plist"></ul>
-            <p id="listStatus" class="muted" role="status" aria-live="polite"></p>
+  <ul id="projectList" class="plist"></ul>
 
-            <div id="treeBlock" hidden>
+  <p id="listStatus" class="muted" role="status" aria-live="polite"></p>
+
+  <div class="actions project-actions">
+    <button id="newProject" class="secondary" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>
+      New
+    </button>
+
+    <button id="importProject" class="secondary" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+      Import
+    </button>
+  </div>
+</div>
+<div id="treeBlock" hidden>
               <div class="panel-head">
                 <h2>
                   <svg class="icon" aria-hidden="true"><use href="#i-file"></use></svg>
@@ -548,7 +552,7 @@
 
       <div class="app-type-grid">
         <label class="choice-card">
-          <input type="radio" name="appType" value="web" checked>
+          <input type="radio" name="appType" value="web">
           <span class="choice-icon"><svg class="icon" aria-hidden="true"><use href="#i-browser"></use></svg></span>
           <strong>Web application</strong>
           <small>Browser-based application with a user interface.</small>
@@ -601,52 +605,36 @@
         <span class="step-number">03</span>
       </div>
 
-      <div class="stack-source-options">
-        <label class="source-option">
-          <input type="radio" name="stackSource" value="ai" checked>
-          <span>
-            <strong>AI recommendation</strong>
-            <small>Generate a stack based on your project requirements.</small>
-          </span>
-        </label>
-        <label class="source-option">
-          <input type="radio" name="stackSource" value="manual">
-          <span>
-            <strong>Manual selection</strong>
-            <small>Define and edit your own technologies.</small>
-          </span>
-        </label>
-      </div>
-
-      <div class="stack-editor">
-        <label for="stackInput">Selected technology stack</label>
-        <textarea id="stackInput" rows="2"
-          placeholder="e.g. React, Python + FastAPI, PostgreSQL"></textarea>
-        <button id="stackSuggest" class="secondary" type="button">
-          <svg class="icon"><use href="#i-refresh"></use></svg>
-          Recommend stack
-        </button>
-        <p id="stackCheck" class="muted" role="status" hidden></p>
-        <div id="stackGuide">
-          <p id="stackGuideStatus" class="muted" role="status" aria-live="polite"></p>
-          <div id="stackSuggestions" class="lang-list"></div>
-        </div>
-      </div>
-
       <h5 class="subsection-title">Architecture components</h5>
       <p class="muted">Review the main layers of your application. Final choices should reflect the project requirements.</p>
 
       <div class="architecture-list">
-        <details class="architecture-item" open>
-          <summary>
-            <span class="architecture-icon">UI</span>
-            <span><strong>Frontend</strong><small>User interface and client-side application</small></span>
-          </summary>
-          <div class="architecture-body">
-            <label for="frontendStack">Technology</label>
-            <input id="frontendStack" placeholder="e.g. React, Vue, or none">
-          </div>
-        </details>
+        
+
+
+    <details class="architecture-item" open>
+      <summary>
+        <span class="architecture-icon">UI</span>
+        <span><strong>Frontend</strong><small>User interface and client-side application</small></span>
+      </summary>
+
+    <div class="architecture-body">
+      <label for="frontendStack">Technology</label>
+      <div class="architecture-input-row">
+        <input id="frontendStack" placeholder="e.g. React, Vue, or none">
+        <button
+          type="button"
+          class="field-ai-suggest"
+          data-suggest-component="frontend"
+          title="Suggest with AI"
+          aria-label="Suggest with AI for Frontend"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+        </button>
+      </div>
+    </div>
+
+    </details>
 
         <details class="architecture-item" open>
           <summary>
@@ -655,9 +643,22 @@
           </summary>
           <div class="architecture-body">
             <label for="backendStack">Technology</label>
-            <input id="backendStack" placeholder="e.g. Python + FastAPI">
+            <div class="architecture-input-row">
+              <input id="backendStack" placeholder="e.g. Python + FastAPI">
+              <button
+                type="button"
+                class="field-ai-suggest"
+                data-suggest-component="backend"
+                title="Suggest with AI"
+                aria-label="Suggest with AI for Backend & API"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+              </button>
+            </div>
           </div>
         </details>
+
+
 
         <details class="architecture-item" open>
           <summary>
@@ -666,7 +667,18 @@
           </summary>
           <div class="architecture-body">
             <label for="databaseStack">Technology</label>
-            <input id="databaseStack" placeholder="e.g. PostgreSQL, SQLite, or none">
+            <div class="architecture-input-row">
+              <input id="databaseStack" placeholder="e.g. PostgreSQL, SQLite, or none">
+              <button
+                type="button"
+                class="field-ai-suggest"
+                data-suggest-component="database"
+                title="Suggest with AI"
+                aria-label="Suggest with AI for Database"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+              </button>
+            </div>
           </div>
         </details>
 
@@ -677,7 +689,18 @@
           </summary>
           <div class="architecture-body">
             <label for="testingStack">Tools</label>
-            <input id="testingStack" placeholder="e.g. pytest, Playwright">
+            <div class="architecture-input-row">
+              <input id="testingStack" placeholder="e.g. pytest, Playwright">
+              <button
+                type="button"
+                class="field-ai-suggest"
+                data-suggest-component="testing"
+                title="Suggest with AI"
+                aria-label="Suggest with AI for Testing"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+              </button>
+            </div>
           </div>
         </details>
 
@@ -688,7 +711,18 @@
           </summary>
           <div class="architecture-body">
             <label for="securityStack">Requirements and tools</label>
-            <input id="securityStack" placeholder="e.g. environment variables, OAuth">
+            <div class="architecture-input-row">
+              <input id="securityStack" placeholder="e.g. environment variables, OAuth">
+              <button
+                type="button"
+                class="field-ai-suggest"
+                data-suggest-component="security"
+                title="Suggest with AI"
+                aria-label="Suggest with AI for Security"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+              </button>
+            </div>
           </div>
         </details>
 
@@ -699,7 +733,18 @@
           </summary>
           <div class="architecture-body">
             <label for="deploymentStack">Tools</label>
-            <input id="deploymentStack" placeholder="e.g. Docker, CI/CD">
+            <div class="architecture-input-row">
+              <input id="deploymentStack" placeholder="e.g. Docker, CI/CD">
+              <button
+                type="button"
+                class="field-ai-suggest"
+                data-suggest-component="deployment"
+                title="Suggest with AI"
+                aria-label="Suggest with AI for Deployment"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+              </button>
+            </div>
           </div>
         </details>
 
@@ -711,7 +756,18 @@
           <div class="architecture-body">
             <p class="muted">Caching, background workers, queues, object storage, horizontal scaling, orchestration and disaster recovery.</p>
             <label for="scalingStack">Optional components</label>
-            <input id="scalingStack" placeholder="Add only what the project needs">
+            <div class="architecture-input-row">
+              <input id="scalingStack" placeholder="Add only what the project needs">
+              <button
+                type="button"
+                class="field-ai-suggest"
+                data-suggest-component="scaling"
+                title="Suggest with AI"
+                aria-label="Suggest with AI for Scaling"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+              </button>
+            </div>
           </div>
         </details>
       </div>
@@ -727,32 +783,21 @@
         <span class="step-number">04</span>
       </div>
 
-      <div class="environment-toolbar">
-        <div>
-          <strong>Local environment</strong>
-          <p class="muted">Illustrative preview Ã¢â‚¬â€ local detection has not run.</p>
-        </div>
-        <button id="checkEnvironment" class="secondary" type="button">
-          <svg class="icon"><use href="#i-refresh"></use></svg>
-          Check environment
-        </button>
-      </div>
-
       <div class="environment-summary">
         <div class="environment-stat">
           <span class="status-dot installed"></span>
           <span>Installed</span>
-          <strong id="countInstalled">1</strong>
+          <strong id="countInstalled">0</strong>
         </div>
         <div class="environment-stat">
           <span class="status-dot mismatch"></span>
           <span>Mismatched</span>
-          <strong id="countMismatch">1</strong>
+          <strong id="countMismatch">0</strong>
         </div>
         <div class="environment-stat">
           <span class="status-dot missing"></span>
           <span>Not installed</span>
-          <strong id="countMissing">1</strong>
+          <strong id="countMissing">0</strong>
         </div>
         <div class="environment-stat">
           <span class="status-dot unchecked"></span>
@@ -767,97 +812,16 @@
         <button class="environment-filter" type="button" data-filter="mismatch">Mismatched</button>
         <button class="environment-filter" type="button" data-filter="missing">Missing</button>
         <button class="environment-filter" type="button" data-filter="unchecked">Not checked</button>
+        <button id="checkEnvironment" class="environment-refresh" type="button" title="Check environment" aria-label="Check environment">
+          <svg class="icon"><use href="#i-refresh"></use></svg>
+        </button>
       </div>
 
-      <div class="environment-list">
-        <article class="environment-item" data-status="installed">
-          <div class="environment-item-head">
-            <div class="technology-mark">Py</div>
-            <div class="technology-info">
-              <strong>Python</strong>
-              <small>Backend runtime</small>
-            </div>
-            <span class="status-pill installed">Installed</span>
-          </div>
-          <div class="version-grid">
-            <div><small>Installed version</small><strong>3.12.4</strong></div>
-            <div><small>Target version</small><strong>3.12</strong></div>
-          </div>
-          <details class="environment-details">
-            <summary>Version and installation details</summary>
-            <p>Illustrative result: the detected version meets the target requirement.</p>
-          </details>
-        </article>
-
-        <article class="environment-item" data-status="mismatch">
-          <div class="environment-item-head">
-            <div class="technology-mark">JS</div>
-            <div class="technology-info">
-              <strong>Node.js</strong>
-              <small>Frontend runtime</small>
-            </div>
-            <span class="status-pill mismatch">Version mismatch</span>
-          </div>
-          <div class="version-grid">
-            <div><small>Installed version</small><strong>20.15.1</strong></div>
-            <div><small>Target version</small><strong>22 LTS</strong></div>
-          </div>
-          <details class="environment-details">
-            <summary>Version and installation details</summary>
-            <p>Illustrative result: review compatibility and the proposed upgrade before making changes.</p>
-            <div class="proposed-action">
-              <strong>Proposed action</strong>
-              <p>Review the target release, package source, upgrade commands and impact before confirmation.</p>
-            </div>
-            <button class="secondary" type="button" data-env-action="upgrade">Review upgrade plan</button>
-          </details>
-        </article>
-
-        <article class="environment-item" data-status="missing">
-          <div class="environment-item-head">
-            <div class="technology-mark">DB</div>
-            <div class="technology-info">
-              <strong>PostgreSQL</strong>
-              <small>Database</small>
-            </div>
-            <span class="status-pill missing">Not installed</span>
-          </div>
-          <div class="version-grid">
-            <div><small>Installed version</small><strong>Not found</strong></div>
-            <div><small>Target version</small><strong>16</strong></div>
-          </div>
-          <details class="environment-details">
-            <summary>Version and installation details</summary>
-            <p>Illustrative result: a real local check must confirm absence before showing this status.</p>
-            <div class="proposed-action">
-              <strong>Proposed action</strong>
-              <p>Review installation options, dependencies, package source and system impact.</p>
-            </div>
-            <button class="secondary" type="button" data-env-action="install">Review installation plan</button>
-          </details>
-        </article>
-
-        <article class="environment-item" data-status="unchecked">
-          <div class="environment-item-head">
-            <div class="technology-mark">DK</div>
-            <div class="technology-info">
-              <strong>Docker</strong>
-              <small>Container tooling</small>
-            </div>
-            <span class="status-pill unchecked">Not checked</span>
-          </div>
-          <div class="version-grid">
-            <div><small>Installed version</small><strong>Unknown</strong></div>
-            <div><small>Target version</small><strong>Stable</strong></div>
-          </div>
-          <details class="environment-details">
-            <summary>Version and installation details</summary>
-            <p>DevPilot must check the local system before deciding whether Docker is installed.</p>
-          </details>
-        </article>
-      </div>
-
-      <div class="wizard-tip">
+      <p id="environmentEmpty" class="muted">
+        Environment checks will run automatically when you open this step.
+      </p>
+      <div class="environment-list" id="environmentList"></div>
+<div class="wizard-tip">
         <svg class="icon" aria-hidden="true"><use href="#i-help"></use></svg>
         <p>No software should be installed or upgraded without showing the proposed commands and receiving your explicit confirmation.</p>
       </div>
@@ -939,6 +903,68 @@
     </div>
   </footer>
 </dialog>
+
+<dialog id="importDialog" class="project-wizard" aria-labelledby="importDialogTitle">
+  <header class="wizard-header">
+    <div class="wizard-intro">
+      <h3 id="importDialogTitle">Import Project</h3>
+      <p class="wizard-intro-description">
+        Import an existing project from your computer or a GitHub repository.
+      </p>
+    </div>
+    <button id="importDialogClose" class="dialog-x" type="button" aria-label="Close dialog">
+      <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+    </button>
+  </header>
+
+  <div class="wizard-section">
+    <p class="field-label">Import from</p>
+    <div class="lang-list" role="radiogroup" aria-label="Import source">
+      <label class="lang">
+        <input type="radio" name="importSourceChoice" value="folder" checked>
+        <span>My computer</span>
+        <small>Select an existing project folder</small>
+      </label>
+      <label class="lang">
+        <input type="radio" name="importSourceChoice" value="github">
+        <span>GitHub</span>
+        <small>Read from a repository URL</small>
+      </label>
+    </div>
+    <p class="muted">Your files and folder structure are imported as they are. DevPilot works on a separate branch.</p>
+
+    <div id="importGithubBlock" hidden>
+      <label for="importGithubUrl">Repository URL</label>
+      <input id="importGithubUrl" type="url"
+             placeholder="https://github.com/owner/repo"
+             autocomplete="url">
+    </div>
+
+    <div id="importFolderBlock">
+      <label for="importProjectPath">Project folder</label>
+      <div class="row workspace-path-row">
+        <input id="importProjectPath" type="text"
+               placeholder="Choose an existing project folder"
+               autocomplete="off">
+        <button id="importBrowseProject" class="secondary" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+          Browse
+        </button>
+      </div>
+    </div>
+
+    <p id="importDialogPreview" class="muted"></p>
+    <p id="importDialogStatus" class="muted" role="status" aria-live="polite"></p>
+  </div>
+
+  <footer class="wizard-footer">
+    <button id="importDialogCancel" class="secondary" type="button">Cancel</button>
+    <button id="importDialogSubmit" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+      Import project
+    </button>
+  </footer>
+</dialog>
   </main>
 
   <!-- Real FastAPI backend. Do not also load mock.js. -->
@@ -969,7 +995,15 @@
             );
 
           case "stack":
-            return Boolean(value("stackInput"));
+              return [
+                "frontendStack",
+                "backendStack",
+                "databaseStack",
+                "testingStack",
+                "securityStack",
+                "deploymentStack",
+                "scalingStack"
+              ].some(id => Boolean(value(id)));
 
           case "environment":
             return (
@@ -1026,6 +1060,10 @@
       next.hidden = currentStep === stepNames.length - 1;
       create.hidden = currentStep !== stepNames.length - 1;
       updateCompletedTabs();
+
+      if (stepNames[currentStep] === "environment") {
+        dialog.dispatchEvent(new CustomEvent("wizard-environment-step"));
+      }
     }
 
     dialog.showWizardStep = showStep;
@@ -1052,22 +1090,12 @@
       });
     });
 
-    const checkButton = document.getElementById("checkEnvironment");
-    checkButton?.addEventListener("click", () => {
-      document.getElementById("environmentStatus").textContent =
-        "Prototype only. Local environment detection is not connected yet.";
-    });
-
-    dialog.querySelectorAll("[data-env-action]").forEach(button => {
-      button.addEventListener("click", () => {
-        document.getElementById("environmentStatus").textContent =
-          "Prototype only. Installation plans and confirmation will be connected to the backend later.";
-      });
-    });
-
     showStep(0);
   })();
 </script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>
+
+
+

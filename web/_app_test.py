@@ -1038,10 +1038,18 @@ class _AppTest:
 
             def ask(self, prompt, **kwargs):
                 self.ask_kwargs = kwargs
-                return (
-                    '[{"stack": "FastAPI", '
-                    '"reason": "Simple backend for the bookstore."}]'
-                )
+                return """
+                               {
+                                   "frontend": "React",
+                                   "backend": "FastAPI",
+                                   "database": "PostgreSQL",
+                                   "testing": "pytest",
+                                   "security": "OAuth2",
+                                   "deployment": "Docker",
+                                   "scaling": "Horizontal scaling",
+                                   "reason": "Simple architecture for the bookstore."
+                               }
+                               """
 
         fake_llm = FakeLLM()
 
@@ -1063,20 +1071,107 @@ class _AppTest:
         assert fake_llm.ask_kwargs["options"]["num_predict"] == 1024
         assert fake_llm.ask_kwargs["think"] is False
 
+
+    def test_stack_advice_returns_options_for_selected_component(
+        self, monkeypatch
+    ):
+        class FakeLLM:
+            def ask(self, prompt, **kwargs):
+                assert "frontend" in prompt.lower()
+                assert "version" in prompt.lower()
+                return """
+                {
+                    "suggestions": [
+                        "React -19",
+                        "Vue -3.5",
+                        "Angular -20"
+                    ]
+                }
+                """
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: FakeLLM(),
+        )
+
+        result = web_app_module.generate_stack_advice(
+            "Build a task management web application",
+            target_component="frontend",
+        )
+
+        assert result == [
+            "React -19",
+            "Vue -3.5",
+            "Angular -20",
+        ]
+
+    def test_stack_advice_returns_seven_architecture_components(
+            self, monkeypatch
+    ):
+        class FakeLLM:
+            def ask(self, prompt, **kwargs):
+                return """
+                    {
+                        "frontend": "React",
+                        "backend": "FastAPI",
+                        "database": "PostgreSQL",
+                        "testing": "pytest",
+                        "security": "OAuth2",
+                        "deployment": "Docker",
+                        "scaling": "Horizontal scaling",
+                        "reason": "Fits a growing web application."
+                    }
+                    """
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: FakeLLM(),
+        )
+
+        result = web_app_module.generate_stack_advice(
+            "Build a task management web application"
+        )
+
+        assert isinstance(result, dict)
+        assert result["frontend"] == "React"
+        assert result["backend"] == "FastAPI"
+        assert result["database"] == "PostgreSQL"
+        assert result["testing"] == "pytest"
+        assert result["security"] == "OAuth2"
+        assert result["deployment"] == "Docker"
+        assert result["scaling"] == "Horizontal scaling"
+        assert result["reason"] == "Fits a growing web application."
+
     def test_stack_advice_endpoint_returns_recommendations(self):
         class FakeStackAdvisor:
             def __call__(self, description, project_path=None):
                 assert description == (
                     "Build a task management web application"
                 )
-                return [
-                    {
-                        "stack": "FastAPI + React",
-                        "reason": (
-                            "Provides a Python backend and a modern frontend."
-                        ),
-                    }
-                ]
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": (
+                        "Provides a Python backend and a modern frontend."
+                    ),
+                }
 
         client = TestClient(
             create_app(
@@ -1096,14 +1191,18 @@ class _AppTest:
 
         assert response.status_code == 200, response.text
         assert response.json() == {
-            "suggestions": [
-                {
-                    "stack": "FastAPI + React",
-                    "reason": (
-                        "Provides a Python backend and a modern frontend."
-                    ),
-                }
-            ]
+                "architecture": {
+                "frontend": "React",
+                "backend": "FastAPI",
+                "database": "PostgreSQL",
+                "testing": "pytest",
+                "security": "JWT authentication",
+                "deployment": "Docker",
+                "scaling": "Horizontal scaling",
+                "reason": (
+                    "Provides a Python backend and a modern frontend."
+                ),
+            }
         }
 
     def test_stack_advice_endpoint_returns_recommendations(self, tmp_path):
@@ -1117,14 +1216,18 @@ class _AppTest:
                 )
                 assert project_path is not None
 
-                return [
-                    {
-                        "stack": "FastAPI + React",
-                        "reason": (
-                            "Provides a Python backend and a modern frontend."
-                        ),
-                    }
-                ]
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": (
+                        "Provides a Python backend and a modern frontend."
+                    ),
+                }
 
         registry = _ProjectRegistryStub(
             projects={
@@ -1154,14 +1257,18 @@ class _AppTest:
 
         assert response.status_code == 200, response.text
         assert response.json() == {
-            "suggestions": [
-                {
-                    "stack": "FastAPI + React",
-                    "reason": (
-                        "Provides a Python backend and a modern frontend."
-                    ),
-                }
-            ]
+            "architecture": {
+                "frontend": "React",
+                "backend": "FastAPI",
+                "database": "PostgreSQL",
+                "testing": "pytest",
+                "security": "JWT authentication",
+                "deployment": "Docker",
+                "scaling": "Horizontal scaling",
+                "reason": (
+                    "Provides a Python backend and a modern frontend."
+                ),
+            }
         }
 
     def test_stack_advice_rejects_empty_description(self):
@@ -1263,12 +1370,16 @@ class _AppTest:
             def __call__(self, description, project_path=None):
                 self.description = description
                 self.project_path = project_path
-                return [
-                    {
-                        "stack": "React + existing backend",
-                        "reason": "Reuse the existing React dependency.",
-                    }
-                ]
+                return {
+                    "frontend": "React",
+                    "backend": "Existing backend",
+                    "database": "Existing database",
+                    "testing": "Existing test suite",
+                    "security": "Existing security controls",
+                    "deployment": "Existing deployment",
+                    "scaling": "Review current capacity",
+                    "reason": "Reuse the existing React dependency.",
+                }
 
         advisor = FakeStackAdvisor()
         client = TestClient(
@@ -1341,7 +1452,8 @@ class _AppTest:
         response = client.get("/static/app.js")
 
         assert response.status_code == 200
-        assert 'requestAI("stack-recommendations"' in response.text
+        assert "requestAI(" in response.text
+        assert '"stack-recommendations"' in response.text
 
 
     def test_shared_ai_api_does_not_start_project_or_agent_core_tasks(self):
@@ -1396,12 +1508,18 @@ class _AppTest:
                     }
                 )
                 return {
-                    "recommendations": [
-                        {
-                            "stack": "FastAPI + PostgreSQL",
-                            "reason": "Suitable for the described application.",
-                        }
-                    ]
+                        "architecture": {
+                        "frontend": "React",
+                        "backend": "FastAPI",
+                        "database": "PostgreSQL",
+                        "testing": "pytest",
+                        "security": "JWT authentication",
+                        "deployment": "Docker",
+                        "scaling": "Horizontal scaling",
+                        "reason": (
+                            "Suitable for the described application."
+                        ),
+                    }
                 }
 
         capabilities = FakeAICapabilities()
@@ -1422,14 +1540,21 @@ class _AppTest:
         assert response.status_code == 200
         assert response.json() == {
             "result": {
-                "recommendations": [
-                    {
-                        "stack": "FastAPI + PostgreSQL",
-                        "reason": "Suitable for the described application.",
-                    }
-                ]
+                "architecture": {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": (
+                        "Suitable for the described application."
+                    ),
+                }
             }
         }
+
         assert capabilities.calls == [
             {
                 "capability": "stack-recommendations",
@@ -1487,12 +1612,16 @@ class _AppTest:
     def test_default_app_executes_stack_recommendations(self):
         class FakeStackAdvisor:
             def __call__(self, description, project_path=None):
-                return [
-                    {
-                        "stack": "FastAPI + PostgreSQL",
-                        "reason": "Suitable for the application.",
-                    }
-                ]
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": "Suitable for the application.",
+                }
 
         app.state.ai_capabilities.stack_advisor = FakeStackAdvisor()
 
@@ -1513,9 +1642,8 @@ class _AppTest:
             )
 
         assert response.status_code == 200
-        assert response.json()["result"]["recommendations"][0][
-            "stack"
-        ] == "FastAPI + PostgreSQL"
+        assert response.json()["result"]["architecture"]["backend"] == "FastAPI"
+        assert response.json()["result"]["architecture"]["database"] == "PostgreSQL"
 
     def test_default_ai_capabilities_support_stack_recommendations(
         self, monkeypatch
@@ -1523,12 +1651,16 @@ class _AppTest:
         class FakeStackAdvisor:
             def __call__(self, description, project_path=None):
                 assert description == "Build an online bookstore"
-                return [
-                    {
-                        "stack": "FastAPI + PostgreSQL",
-                        "reason": "Suitable for the application.",
-                    }
-                ]
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": "Suitable for the application.",
+                }
 
         monkeypatch.setattr(
             web_app_module,
@@ -1555,12 +1687,16 @@ class _AppTest:
         assert response.status_code == 200
         assert response.json() == {
             "result": {
-                "recommendations": [
-                    {
-                        "stack": "FastAPI + PostgreSQL",
-                        "reason": "Suitable for the application.",
-                    }
-                ]
+                "architecture": {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": "Suitable for the application.",
+                }
             }
         }
 
@@ -1571,8 +1707,23 @@ class _AppTest:
 
         print("Stack recommendations:", repr(recommendations))
 
-        assert isinstance(recommendations, list)
-        assert recommendations, "No recommendations were returned"
+        assert isinstance(recommendations, dict)
+        required_fields = {
+            "frontend",
+            "backend",
+            "database",
+            "testing",
+            "security",
+            "deployment",
+            "scaling",
+            "reason",
+        }
+        assert required_fields.issubset(recommendations.keys())
+        assert all(
+            isinstance(recommendations[field], str)
+            and recommendations[field].strip()
+            for field in required_fields
+        ), "The architecture recommendation is incomplete"
 
     def test_project_ask_mode_reaches_real_agent_loop(self, tmp_path):
         target = tmp_path / "must_not_be_created.py"
@@ -2073,3 +2224,114 @@ class _AppTest:
         assert project["security_stack"] == "Environment variables + OAuth"
         assert project["deployment_stack"] == "Docker + CI/CD"
         assert project["scaling_stack"] == "Caching + background workers"
+
+
+    def test_environment_check_reports_each_selected_technology(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/environment/check",
+            json={
+                "mode": "local",
+                "requirements": [
+                    {
+                        "component": "backend",
+                        "name": "Python",
+                        "version": "3.12",
+                    },
+                    {
+                        "component": "backend",
+                        "name": "FastAPI",
+                        "version": "0.115",
+                    },
+                    {
+                        "component": "database",
+                        "name": "PostgreSQL",
+                        "version": "17",
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+
+        results = response.json()["results"]
+        assert len(results) == 3
+        assert [item["name"] for item in results] == [
+            "Python",
+            "FastAPI",
+            "PostgreSQL",
+        ]
+        assert all(
+            item["status"] in {
+                "installed",
+                "version_mismatch",
+                "not_installed",
+                "check_failed",
+            }
+            for item in results
+        )
+
+    def test_environment_check_uses_local_agent_client(self, tmp_path, monkeypatch):
+        import web.app as app_module
+
+        calls = []
+        expected_results = [
+            {
+                "component": "database",
+                "name": "PostgreSQL",
+                "requested_version": "17",
+                "detected_version": None,
+                "status": "not_installed",
+            }
+        ]
+
+        class FakeLocalEnvironmentClient:
+            def __init__(self):
+                pass
+
+            def check_environment(self, requirements):
+                calls.append(requirements)
+                return {"results": expected_results}
+
+        monkeypatch.setattr(
+            app_module,
+            "LocalEnvironmentClient",
+            FakeLocalEnvironmentClient,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        requirements = [
+            {
+                "component": "database",
+                "name": "PostgreSQL",
+                "version": "17",
+            }
+        ]
+
+        response = client.post(
+            "/environment/check",
+            json={
+                "mode": "local",
+                "requirements": requirements,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert calls == [requirements]
+        assert response.json() == {"results": expected_results}
+

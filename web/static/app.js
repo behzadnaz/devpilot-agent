@@ -1,4 +1,4 @@
-const $ = id => document.getElementById(id);
+﻿const $ = id => document.getElementById(id);
 const remember = (key, value) => { try { localStorage.setItem(key, value); } catch (e) {} };
 const recall = key => { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } };
 const errorText = (detail, fallback) => Array.isArray(detail)
@@ -113,7 +113,7 @@ function basisBadge(basis) {
   const files = Array.isArray(basis.files) ? basis.files : [];
   const list = files.join(", ");
   const kinds = {
-    changed: ["code", "Changed code" + (files.length > 1 ? " · " + files.length + " files" : ""), files.length ? "Edited: " + list + ". Click to view the changes." : "Click to view the changes."],
+    changed: ["code", "Changed code" + (files.length > 1 ? " Ãƒâ€šÃ‚Â· " + files.length + " files" : ""), files.length ? "Edited: " + list + ". Click to view the changes." : "Click to view the changes."],
     analyzed: ["search", "Analyzed project", files.length ? "Based on: " + list : "Based on your project files."],
     documents: ["file", "Read attached files", files.length ? "Based on: " + list : "Based on your attached files."],
     nochange: ["check", "No changes", "Nothing in your project was edited."],
@@ -153,7 +153,7 @@ function appendChatMessage(log, speaker, text, persist, time, tags, basis) {
   entry.className = "chat-entry " + (speaker === "You" ? "you" : "them");
 
   const heading = document.createElement("strong");
-  heading.textContent = speaker + (stamp ? " · " + new Date(stamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+  heading.textContent = speaker + (stamp ? " Ãƒâ€šÃ‚Â· " + new Date(stamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
 
   const content = document.createElement("div");
   renderRich(content, text);
@@ -748,6 +748,13 @@ const languageBlock = $("languageBlock");
 const projectPath = $("projectPath");
 const dialogStatus = $("dialogStatus");
 const dialogCreate = $("dialogCreate");
+
+const importDialog = $("importDialog");
+const importDialogStatus = $("importDialogStatus");
+const importDialogPreview = $("importDialogPreview");
+const importDialogSubmit = $("importDialogSubmit");
+const importProjectPath = $("importProjectPath");
+const importGithubUrl = $("importGithubUrl");
 
 let selectedProjectId = "";
 let knownProjects = new Set();
@@ -1352,15 +1359,13 @@ async function openProjectDialog(mode) {
   idPreview.textContent = "";
   dialogStatus.textContent = "";
   dialogCreate.disabled = false;
-  projectPath.value = mode === "create" ? recall("devpilot.folder") : "";
-  $("stackInput").value = "";
+  projectPath.value = "";
+  const rememberedFolder = mode === "create" ? recall("devpilot.folder") : "";
+  if (rememberedFolder) projectPath.placeholder = `Last used: ${rememberedFolder}`;
+
     // Reset project architecture selections for each new project.
   projectDialog.querySelectorAll('input[name="appType"]').forEach(input => {
-    input.checked = input.value === "web";
-  });
-
-  projectDialog.querySelectorAll('input[name="stackSource"]').forEach(input => {
-    input.checked = input.value === "ai";
+    input.checked = false;
   });
 
   [
@@ -1375,31 +1380,321 @@ async function openProjectDialog(mode) {
     $(id).value = "";
   });
 
-  $("stackCheck").hidden = true;
-  updateStackSourceUI();
-  $("stackGuideStatus").textContent = "";
-  $("stackSuggestions").replaceChildren();
   stackCheckToken++;
+  resetEnvironmentStep();
   projectDialog.showModal();
   dialogNameInput.focus();
-
-  if (mode !== "create") return;
-
-  await loadStacks();
 }
+
+// --- Environment checks (wizard step 4) ---------------------------------
+
+const environmentStatus = $("environmentStatus");
+const environmentList = $("environmentList");
+const environmentEmpty = $("environmentEmpty");
+
+const ENVIRONMENT_SOURCES = [
+  ["frontendStack", "Frontend"],
+  ["backendStack", "Backend & API"],
+  ["databaseStack", "Database"],
+  ["testingStack", "Testing"],
+  ["securityStack", "Security"],
+  ["deploymentStack", "Deployment"],
+  ["scalingStack", "Scaling"],
+];
+
+// Backend statuses mapped onto the four card states.
+const ENVIRONMENT_CARD_STATUS = {
+  installed: "installed",
+  version_mismatch: "mismatch",
+  not_installed: "missing",
+};
+
+const ENVIRONMENT_PILL_LABEL = {
+  installed: "Installed",
+  mismatch: "Version mismatch",
+  missing: "Not installed",
+  unchecked: "Not checked",
+};
+
+const ENVIRONMENT_INSTALL_HINTS = {
+  python: "https://www.python.org/downloads/",
+  node: "https://nodejs.org/en/download",
+  npm: "https://docs.npmjs.com/downloading-and-installing-node-js-and-npm",
+  java: "https://www.java.com/download/",
+  go: "https://go.dev/dl/",
+  rust: "https://www.rust-lang.org/tools/install",
+  php: "https://www.php.net/downloads.php",
+  ruby: "https://www.ruby-lang.org/en/downloads/",
+  dotnet: "https://dotnet.microsoft.com/download",
+  docker: "https://docs.docker.com/get-docker/",
+  git: "https://git-scm.com/downloads",
+  postgresql: "https://www.postgresql.org/download/",
+  mysql: "https://dev.mysql.com/downloads/",
+  sqlite: "https://www.sqlite.org/download.html",
+  mongodb: "https://www.mongodb.com/try/download/",
+  redis: "https://redis.io/docs/latest/operate/oss_and_stack/install/",
+};
+
+const ENVIRONMENT_HINT_ALIASES = {
+  "node.js": "node",
+  nodejs: "node",
+  postgres: "postgresql",
+  golang: "go",
+  rustc: "rust",
+  mongo: "mongodb",
+  sqlite3: "sqlite",
+};
+
+let environmentCheckToken = 0;
+
+function collectStackRequirements() {
+  const found = new Map();
+
+  ENVIRONMENT_SOURCES.forEach(([inputId, component]) => {
+    $(inputId).value
+      .split(/[,+]/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .forEach(name => {
+        const key = name.toLowerCase();
+        if (!found.has(key)) found.set(key, { component, name });
+      });
+  });
+
+  return [...found.values()];
+}
+
+function environmentMonogram(name) {
+  const letters = name.replace(/[^a-z0-9]/gi, "");
+  return (letters.slice(0, 3) || "?").toUpperCase();
+}
+
+function environmentCard(item) {
+  const card = document.createElement("div");
+  card.className = "environment-item";
+  card.dataset.status = "unchecked";
+
+  const head = document.createElement("div");
+  head.className = "environment-item-head";
+
+  const mark = document.createElement("span");
+  mark.className = "technology-mark";
+  mark.textContent = environmentMonogram(item.name);
+
+  const info = document.createElement("span");
+  info.className = "technology-info";
+  const name = document.createElement("strong");
+  name.textContent = item.name;
+  const component = document.createElement("small");
+  component.textContent = item.component;
+  info.append(name, component);
+
+  const pill = document.createElement("span");
+  pill.className = "status-pill unchecked";
+  pill.textContent = "CheckingÃ¢â‚¬Â¦";
+
+  head.append(mark, info, pill);
+  card.append(head);
+  return card;
+}
+
+function environmentVersionGrid(card, requested, detected) {
+  card.querySelector(".version-grid")?.remove();
+
+  const grid = document.createElement("div");
+  grid.className = "version-grid";
+
+  [["Requested", requested], ["Detected", detected]].forEach(([label, value]) => {
+    const cell = document.createElement("div");
+    const small = document.createElement("small");
+    small.textContent = label;
+    const strong = document.createElement("strong");
+    strong.textContent = value || "Ã¢â‚¬â€";
+    cell.append(small, strong);
+    grid.append(cell);
+  });
+
+  card.append(grid);
+}
+
+function environmentDetails(card, note, action) {
+  card.querySelector(".environment-details")?.remove();
+
+  const details = document.createElement("details");
+  details.className = "environment-details";
+
+  const summary = document.createElement("summary");
+  summary.textContent = "Details";
+  details.append(summary);
+
+  const noteParagraph = document.createElement("p");
+  noteParagraph.textContent = note;
+  details.append(noteParagraph);
+
+  if (action) {
+    const box = document.createElement("div");
+    box.className = "proposed-action";
+    const text = document.createElement("p");
+    text.textContent = action;
+    box.append(text);
+    details.append(box);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.setAttribute("data-env-action", "");
+    button.textContent = "Confirm installation";
+    details.append(button);
+  }
+
+  card.append(details);
+}
+
+function environmentInstallHint(name) {
+  const key = ENVIRONMENT_HINT_ALIASES[name.toLowerCase()] || name.toLowerCase();
+  return ENVIRONMENT_INSTALL_HINTS[key] || null;
+}
+
+function applyEnvironmentResult(card, result) {
+  const status = ENVIRONMENT_CARD_STATUS[result.status] || "unchecked";
+  card.dataset.status = status;
+
+  const pill = card.querySelector(".status-pill");
+  pill.className = `status-pill ${status}`;
+  pill.textContent = ENVIRONMENT_PILL_LABEL[status];
+
+  const detected = result.detected_version || "";
+  const requested = result.requested_version || "";
+  const runtime = result.runtime ? ` through ${result.runtime}` : "";
+
+  environmentVersionGrid(card, requested, detected);
+
+  if (result.note) {
+    environmentDetails(card, result.note);
+    return;
+  }
+
+  if (status === "installed") {
+    environmentDetails(
+      card,
+      `${result.name} is available on this computer${runtime}` +
+        (detected ? ` (version ${detected}).` : "."),
+    );
+  } else if (status === "mismatch") {
+    environmentDetails(
+      card,
+      `Requested version ${requested}, but version ${detected} is installed` +
+        `${runtime}. Align the stack with the installed version or install the requested one.`,
+    );
+  } else if (status === "missing") {
+    const url = environmentInstallHint(result.name);
+    const proposal = url
+      ? `Install ${result.name} from ${url}`
+      : `Install ${result.name}`;
+    environmentDetails(
+      card,
+      `${result.name} was not found on this computer${runtime}.`,
+      `Proposed: ${proposal}. Nothing is installed without your explicit confirmation.`,
+    );
+  } else {
+    environmentDetails(
+      card,
+      "DevPilot cannot verify this technology automatically. Review it on this computer yourself.",
+    );
+  }
+}
+
+function refreshEnvironmentSummary() {
+  const cards = [...environmentList.querySelectorAll(".environment-item")];
+  const counts = { installed: 0, mismatch: 0, missing: 0, unchecked: 0 };
+
+  cards.forEach(card => {
+    if (counts[card.dataset.status] !== undefined) counts[card.dataset.status] += 1;
+  });
+
+  $("countInstalled").textContent = counts.installed;
+  $("countMismatch").textContent = counts.mismatch;
+  $("countMissing").textContent = counts.missing;
+  $("countUnchecked").textContent = counts.unchecked;
+
+  const active =
+    projectDialog.querySelector(".environment-filter.active")?.dataset.filter || "all";
+  cards.forEach(card => {
+    card.hidden = active !== "all" && card.dataset.status !== active;
+  });
+}
+
+function resetEnvironmentStep() {
+  environmentCheckToken++;
+  environmentList.replaceChildren();
+  environmentEmpty.hidden = false;
+  environmentEmpty.textContent =
+    "Environment checks will run automatically when you open this step.";
+  delete environmentStatus.dataset.checked;
+  environmentStatus.textContent = "";
+  refreshEnvironmentSummary();
+}
+
+async function runEnvironmentCheck() {
+  const token = ++environmentCheckToken;
+  const requirements = collectStackRequirements();
+
+  delete environmentStatus.dataset.checked;
+  environmentList.replaceChildren();
+
+  if (!requirements.length) {
+    environmentEmpty.hidden = false;
+    environmentEmpty.textContent =
+      "Add technologies in the Stack step first Ã¢â‚¬â€ they will be checked here.";
+    environmentStatus.textContent = "";
+    refreshEnvironmentSummary();
+    return;
+  }
+
+  environmentEmpty.hidden = true;
+  requirements.forEach(item => environmentList.append(environmentCard(item)));
+  refreshEnvironmentSummary();
+  environmentStatus.textContent =
+    `Checking ${requirements.length} technologies on this computerÃ¢â‚¬Â¦`;
+
+  try {
+    const data = await postJson("/environment/check", {
+      mode: "local",
+      requirements,
+    });
+    if (token !== environmentCheckToken) return;
+
+    const results = Array.isArray(data.results) ? data.results : [];
+    const cards = [...environmentList.querySelectorAll(".environment-item")];
+    results.forEach((result, index) => {
+      if (cards[index]) applyEnvironmentResult(cards[index], result);
+    });
+
+    environmentStatus.dataset.checked = "true";
+    environmentStatus.textContent =
+      `Checked ${results.length} technologies on this computer.`;
+  } catch (error) {
+    if (token !== environmentCheckToken) return;
+    environmentStatus.textContent =
+      error.message || "Could not check the local environment.";
+  }
+
+  refreshEnvironmentSummary();
+  projectDialog.dispatchEvent(new Event("change"));
+}
+
+projectDialog.addEventListener("wizard-environment-step", () => runEnvironmentCheck());
+$("checkEnvironment")?.addEventListener("click", () => runEnvironmentCheck());
+
+environmentList.addEventListener("click", event => {
+  const button = event.target.closest("[data-env-action]");
+  if (!button) return;
+  environmentStatus.textContent =
+    "Installation plans and confirmation will be connected to the backend later. Nothing was installed.";
+});
 
 let stackCheckToken = 0;
 let stackTimer = 0;
-
-async function loadStacks() {
-  if (projectPath.value) return;
-
-  try {
-    const response = await fetch("/languages");
-    const data = await response.json().catch(() => ({}));
-    if (response.ok && data.default_folder && !projectPath.value) projectPath.value = data.default_folder;
-  } catch (e) {}
-}
 
 // The user types the stack (or picks one the AI suggests).
 function chosenStack() {
@@ -1407,7 +1702,7 @@ function chosenStack() {
   return name ? { id: name.toLowerCase(), name } : null;
 }
 
-$("stackInput").addEventListener("input", () => {
+if ($("stackInput")) $("stackInput").addEventListener("input", () => {
   clearTimeout(stackTimer);
   stackCheckToken++;
 
@@ -1462,7 +1757,7 @@ async function checkStack() {
     download.target = "_blank";
     download.rel = "noopener noreferrer";
     download.textContent = "Download";
-    box.append(download, " · ");
+    box.append(download, " Ãƒâ€šÃ‚Â· ");
   }
 
   const recheck = document.createElement("a");
@@ -1558,37 +1853,74 @@ function normalizeStacks(data) {
 async function suggestStacks() {
   const description = $("projectSummary").value.trim();
   const status = $("stackGuideStatus");
-  const list = $("stackSuggestions");
   const button = $("stackSuggest");
 
+  const fields = {
+    frontend: "frontendStack",
+    backend: "backendStack",
+    database: "databaseStack",
+    testing: "testingStack",
+    security: "securityStack",
+    deployment: "deploymentStack",
+    scaling: "scalingStack"
+  };
+
   if (!description) {
-    status.textContent = "Fill in the project summary first, then click Recommend stack.";
+    status.textContent = "Enter the project summary first.";
     return;
   }
 
   button.disabled = true;
-  status.textContent = "Asking the AI for stack recommendations...";
-  list.replaceChildren();
+  status.textContent = "Asking AI to suggest architecture...";
+  $("stackSuggestions").replaceChildren();
 
   try {
-    const context = selectedProjectId ? { project_id: selectedProjectId } : null;
-    const data = await requestAI("stack-recommendations", { description }, context);
-    const items = normalizeStacks(data);
+    const context = selectedProjectId
+      ? { project_id: selectedProjectId }
+      : null;
 
-    if (!items.length) throw new Error("No recommendations were returned.");
+    const data = await requestAI(
+      "stack-recommendations",
+      { description },
+      context
+    );
 
-    renderStackSuggestions(items);
-    status.textContent = "Click a suggestion to use it.";
+    const suggestionsResult =
+    data?.result?.suggestions || data?.suggestions;
+
+    const architecture =
+      data?.result?.architecture || data?.architecture;
+
+    const result =
+      suggestionsResult || architecture?.[component];
+
+    if (
+      !architecture ||
+      !Object.keys(fields).every(
+        key =>
+          typeof architecture[key] === "string" &&
+          architecture[key].trim()
+      )
+    ) {
+      throw new Error("The AI returned an incomplete architecture.");
+    }
+
+    for (const [key, elementId] of Object.entries(fields)) {
+      $(elementId).value = architecture[key].trim();
+    }
+
+    status.textContent =
+      architecture.reason || "Architecture suggestions applied. You can edit any field.";
   } catch (error) {
-    console.error("Stack recommendation failed:", error);
-    renderStackSuggestions(localStackAdvice(description));
-    status.textContent = "The AI could not answer, so these are quick suggestions. Click one to use it.";
+    console.error("Architecture suggestion failed:", error);
+    status.textContent =
+      "Could not generate architecture suggestions. Please try again.";
   } finally {
     button.disabled = false;
   }
 }
 
-$("stackSuggest").addEventListener("click", suggestStacks);
+if ($("stackSuggest")) $("stackSuggest").addEventListener("click", suggestStacks);
 
 // AI recommendation and manual stack selection share the same editor.
 function updateStackSourceUI() {
@@ -1607,16 +1939,381 @@ function updateStackSourceUI() {
   }
 }
 
-projectDialog.querySelectorAll('input[name="stackSource"]').forEach(input => {
-  input.addEventListener("change", updateStackSourceUI);
+
+const architectureFields = {
+  frontend: "frontendStack",
+  backend: "backendStack",
+  database: "databaseStack",
+  testing: "testingStack",
+  security: "securityStack",
+  deployment: "deploymentStack",
+  scaling: "scalingStack"
+};
+
+function updateSelectedStackSuggestion(input, optionsElement) {
+  const currentValue = input.value.trim();
+
+  optionsElement.querySelectorAll(".stack-ai-option").forEach(option => {
+    option.setAttribute(
+      "aria-pressed",
+      String(option.textContent.trim() === currentValue)
+    );
+  });
+}
+
+async function suggestArchitectureField(component, button) {
+  const description = $("projectSummary").value.trim();
+  const input = $(architectureFields[component]);
+
+  if (!description) {
+    $("projectSummary").focus();
+    alert("Please describe the project before requesting a technology suggestion.");
+    return;
+  }
+
+  const originalPlaceholder = input.placeholder;
+  const suggestionLabels = {
+    frontend: "Frontend",
+    backend: "Backend & API",
+    database: "Database & persistence",
+    testing: "Testing & code quality",
+    security: "Security & configuration",
+    deployment: "Deployment & operations",
+    scaling: "Scalability & advanced operations"
+  };
+
+  const fieldContainer = input.closest(".architecture-body");
+  const row = input.closest(".architecture-input-row");
+
+  if (!fieldContainer || !row) {
+    alert("Could not find the technology field layout.");
+    return;
+  }
+
+  let section = fieldContainer.querySelector(".stack-ai-suggestion-section");
+let optionsElement;
+
+if (!section) {
+  // Reuse an existing options container if one is already present.
+  optionsElement = fieldContainer.querySelector(".stack-ai-options");
+
+  if (!optionsElement) {
+    section = document.createElement("section");
+    section.className = "stack-ai-suggestion-section";
+    section.setAttribute("aria-live", "polite");
+
+    const heading = document.createElement("p");
+    heading.className = "stack-ai-suggestion-heading";
+    heading.textContent =
+      "AI suggestions for " + (suggestionLabels[component] || component);
+
+    optionsElement = document.createElement("div");
+    optionsElement.className = "stack-ai-options";
+    optionsElement.setAttribute("role", "group");
+    optionsElement.setAttribute(
+      "aria-label",
+      "AI suggestions for " + (suggestionLabels[component] || component)
+    );
+
+    section.append(heading, optionsElement);
+    row.insertAdjacentElement("afterend", section);
+  }
+} else {
+  optionsElement = section.querySelector(".stack-ai-options");
+}
+
+  if (!section) {
+    section = document.createElement("section");
+    section.className = "stack-ai-suggestion-section";
+    section.setAttribute("aria-live", "polite");
+
+    const heading = document.createElement("p");
+    heading.className = "stack-ai-suggestion-heading";
+    heading.textContent = "AI suggestions for " +
+      (suggestionLabels[component] || component);
+
+    const options = document.createElement("div");
+    options.className = "stack-ai-options";
+    options.setAttribute("role", "group");
+    options.setAttribute(
+      "aria-label",
+      "AI suggestions for " + (suggestionLabels[component] || component)
+    );
+
+    section.append(heading, options);
+    row.insertAdjacentElement("afterend", section);
+  }
+
+  optionsElement = section.querySelector(".stack-ai-options");
+
+  button.disabled = true;
+  button.classList.add("is-loading");
+  button.setAttribute("aria-busy", "true");
+  input.placeholder = "AI is suggesting a technologyÃ¢â‚¬Â¦";
+
+  try {
+    const context = selectedProjectId
+      ? { project_id: selectedProjectId }
+      : null;
+
+    const data = await requestAI(
+      "stack-recommendations",
+      {
+        description,
+        target_component: component
+      },
+      context
+    );
+
+    const suggestionsResult =
+      data?.result?.suggestions ||
+      data?.suggestions;
+
+    const architecture =
+      data?.result?.architecture ||
+      data?.architecture;
+
+    const result =
+      suggestionsResult ||
+      architecture?.[component];
+
+    let suggestions = Array.isArray(result)
+      ? result
+      : typeof result === "string"
+        ? result.split(/\r?\n|;/)
+        : [];
+
+    suggestions = [...new Set(
+      suggestions
+        .filter(item => typeof item === "string")
+        .map(item => item.trim())
+        .filter(Boolean)
+    )];
+
+    if (!suggestions.length) {
+      throw new Error("No suggestion was returned for " + component + ".");
+    }
+
+    optionsElement.replaceChildren();
+
+    suggestions.forEach(suggestion => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "stack-ai-option";
+      option.textContent = suggestion;
+      option.setAttribute("aria-pressed", String(input.value.trim() === suggestion));
+
+      option.addEventListener("click", () => {
+      input.value = suggestion;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      updateSelectedStackSuggestion(input, optionsElement);
+      });
+      optionsElement.appendChild(option);
+    });
+
+    section.hidden = false;
+  } catch (error) {
+    console.error("Architecture suggestion failed:", error);
+    alert(
+      "Could not suggest a technology for " + component +
+      ". Your current selection has been preserved. Please try again."
+    );
+  } finally {
+    input.placeholder = originalPlaceholder;
+    button.disabled = false;
+    button.classList.remove("is-loading");
+    button.removeAttribute("aria-busy");
+  }
+}
+
+Object.values(architectureFields).forEach(inputId => {
+  const input = $(inputId);
+  const fieldContainer = input.closest(".architecture-body");
+
+  input.addEventListener("input", () => {
+    const optionsElement = fieldContainer?.querySelector(
+      ".stack-ai-suggestion-section .stack-ai-options"
+    );
+
+    if (optionsElement) {
+      updateSelectedStackSuggestion(input, optionsElement);
+    }
+  });
+});
+
+Object.entries(architectureFields).forEach(([component]) => {
+  const button = projectDialog.querySelector(
+    `[data-suggest-component="${component}"]`
+  );
+
+  if (button) {
+    button.addEventListener("click", () => {
+      suggestArchitectureField(component, button);
+    });
+  }
 });
 
 
+function chosenStack() {
+  const fields = Object.values(architectureFields);
+  const technologies = fields
+    .map(id => $(id).value.trim())
+    .filter(Boolean);
 
+  if (!technologies.length) return null;
+
+  const name = technologies.join(", ");
+  return { id: name.toLowerCase(), name };
+}
+
+
+
+
+
+async function openImportDialog() {
+  importDialogStatus.textContent = "";
+  importDialogPreview.textContent = "";
+  importDialogSubmit.disabled = false;
+  importProjectPath.value = "";
+  importGithubUrl.value = "";
+
+  importDialog.querySelector(
+    'input[name="importSourceChoice"][value="folder"]'
+  ).checked = true;
+
+  $("importGithubBlock").hidden = true;
+  $("importFolderBlock").hidden = false;
+
+  updateImportDialogPreview();
+  importDialog.showModal();
+}
+
+
+importDialog.querySelectorAll('input[name="importSourceChoice"]').forEach(radio => {
+  radio.addEventListener("change", () => {
+    const github = importDialog.querySelector('input[name="importSourceChoice"]:checked')?.value === "github";
+    $("importGithubBlock").hidden = !github;
+    $("importFolderBlock").hidden = github;
+    importDialogPreview.textContent = "";
+    importDialogStatus.textContent = "";
+  });
+});
+
+$("importBrowseProject").addEventListener("click", async () => {
+  await chooseFolder(importProjectPath, importDialogStatus);
+});
 $("newProject").addEventListener("click", () => openProjectDialog("create"));
-$("importProject").addEventListener("click", () => openProjectDialog("import"));
+$("importProject").addEventListener("click", () => openImportDialog());
 $("dialogCancel").addEventListener("click", () => projectDialog.close());
 $("dialogClose").addEventListener("click", () => projectDialog.close());
+
+$("menuNew").addEventListener("click", () => openProjectDialog("create"));
+$("menuImport").addEventListener("click", () => openImportDialog());
+
+$("importDialogClose").addEventListener("click", () => importDialog.close());
+$("importDialogCancel").addEventListener("click", () => importDialog.close());
+
+function selectedImportSource() {
+  return importDialog.querySelector(
+    'input[name="importSourceChoice"]:checked'
+  )?.value || "folder";
+}
+
+function importDialogId() {
+  const source = selectedImportSource();
+  const raw = source === "github"
+    ? lastPart(importGithubUrl.value.trim()).replace(/\.git$/i, "")
+    : lastPart(importProjectPath.value.trim());
+
+  return slugify(raw);
+}
+
+function updateImportDialogPreview() {
+  const id = importDialogId();
+
+  if (!id) {
+    importDialogPreview.textContent = "";
+    importDialogSubmit.disabled = false;
+    return;
+  }
+
+  const exists = knownProjects.has(id);
+  importDialogPreview.textContent = exists
+    ? `A project "${id}" already exists.`
+    : `Project ID: ${id}`;
+
+  importDialogSubmit.disabled = exists;
+}
+
+importProjectPath.addEventListener("input", updateImportDialogPreview);
+importGithubUrl.addEventListener("input", updateImportDialogPreview);
+
+importDialogSubmit.addEventListener("click", async () => {
+  const source = selectedImportSource();
+  const id = importDialogId();
+  const path = importProjectPath.value.trim();
+  const url = importGithubUrl.value.trim();
+
+  importDialogStatus.textContent = "";
+
+  if (!id) {
+    importDialogStatus.textContent = source === "github"
+      ? "Enter a GitHub repository URL."
+      : "Choose a project folder.";
+    return;
+  }
+
+  if (knownProjects.has(id)) {
+    importDialogStatus.textContent = `A project "${id}" already exists.`;
+    return;
+  }
+
+  if (source === "folder" && !path) {
+    importDialogStatus.textContent = "Choose a project folder.";
+    return;
+  }
+
+  if (source === "github") {
+    let validUrl = false;
+
+    try {
+      const link = new URL(url);
+      validUrl =
+        link.protocol === "https:" &&
+        link.hostname === "github.com" &&
+        link.pathname.split("/").filter(Boolean).length >= 2;
+    } catch (error) {
+      // The URL is invalid.
+    }
+
+    if (!validUrl) {
+      importDialogStatus.textContent =
+        "Enter a valid GitHub URL, like https://github.com/owner/repo.";
+      return;
+    }
+  }
+
+  importDialogSubmit.disabled = true;
+  importDialogStatus.textContent = "Importing project...";
+
+  try {
+    await postJson("/projects/import", {
+      id,
+      path: source === "github" ? "" : path,
+      workflow: "software_development",
+      source,
+      url: source === "github" ? url : "",
+    });
+
+    importDialog.close();
+    await loadProjects();
+    await selectProject(id);
+  } catch (error) {
+    importDialogStatus.textContent = error.message || "Import failed.";
+  } finally {
+    importDialogSubmit.disabled = false;
+  }
+});
 
 $("browseProject").addEventListener("click", async () => {
   await chooseFolder(projectPath, dialogStatus);
@@ -1624,67 +2321,61 @@ $("browseProject").addEventListener("click", async () => {
   updateIdPreview();
 });
 
+
 dialogCreate.addEventListener("click", async () => {
-  const name = dialogMode === "import" ? importId() : dialogNameInput.value.trim();
+  const name = dialogNameInput.value.trim();
   const id = slugify(name);
   const path = projectPath.value.trim();
 
-  if (!name || !id) { dialogStatus.textContent = dialogMode === "import" ? (importSource() === "github" ? "Enter a GitHub repository URL." : "Choose a project folder.") : "Enter a project name with letters or numbers."; return; }
-  if (knownProjects.has(id)) { dialogStatus.textContent = 'A project "' + id + '" already exists.'; return; }
-  if (!path && !(dialogMode === "import" && importSource() === "github")) { dialogStatus.textContent = "Choose a project folder."; return; }
-
-  if (dialogMode === "import" && importSource() === "github") {
-    let validUrl = false;
-    try {
-      const link = new URL($("githubUrl").value.trim());
-      validUrl = link.hostname === "github.com" && link.pathname.split("/").filter(Boolean).length >= 2;
-    } catch (e) {}
-
-    if (!validUrl) { dialogStatus.textContent = "Enter a GitHub repository URL, like https://github.com/owner/repo."; return; }
+  if (!name || !id) {
+    dialogStatus.textContent = "Enter a project name with letters or numbers.";
+    return;
   }
 
-  if (dialogMode === "create" && !chosenStack()) { dialogStatus.textContent = "Type your stack, or ask AI to guide you."; return; }
+  if (knownProjects.has(id)) {
+    dialogStatus.textContent = `A project "${id}" already exists.`;
+    return;
+  }
+
+  if (!path) {
+    dialogStatus.textContent = "Choose a project folder.";
+    return;
+  }
 
   dialogCreate.disabled = true;
-  dialogStatus.textContent = dialogMode === "create" ? "Creating project..." : "Importing project...";
+  dialogStatus.textContent = "Creating project...";
 
   try {
-    if (dialogMode === "create") {
-      const stack = chosenStack();
+    const stack = chosenStack();
 
-      await postJson("/projects", {
-        id,
-        path,
-        summary: $("projectSummary").value.trim(),
-        stack: stack.name,
-        workflow: "software_development",
-        app_type:
-          projectDialog.querySelector('input[name="appType"]:checked')?.value || "web",
-        frontend_stack: $("frontendStack").value.trim(),
-        backend_stack: $("backendStack").value.trim(),
-        database_stack: $("databaseStack").value.trim(),
-        testing_stack: $("testingStack").value.trim(),
-        security_stack: $("securityStack").value.trim(),
-        deployment_stack: $("deploymentStack").value.trim(),
-        scaling_stack: $("scalingStack").value.trim(),
-      });
+    await postJson("/projects", {
+      id,
+      path,
+      summary: $("projectSummary").value.trim(),
+      stack: stack?.name || "",
+      workflow: "software_development",
+      app_type:
+        projectDialog.querySelector('input[name="appType"]:checked')?.value || "web",
+      frontend_stack: $("frontendStack").value.trim(),
+      backend_stack: $("backendStack").value.trim(),
+      database_stack: $("databaseStack").value.trim(),
+      testing_stack: $("testingStack").value.trim(),
+      security_stack: $("securityStack").value.trim(),
+      deployment_stack: $("deploymentStack").value.trim(),
+      scaling_stack: $("scalingStack").value.trim(),
+    });
 
-      remember("devpilot.folder", path);
-    } else {
-      await postJson("/projects/import", { id, path: importSource() === "github" ? "" : path, workflow: "software_development", source: importSource(), url: importSource() === "github" ? $("githubUrl").value.trim() : "" });
-    }
+    remember("devpilot.folder", path);
 
     projectDialog.close();
     await loadProjects();
     await selectProject(id);
   } catch (error) {
     dialogStatus.textContent = error.message || "Request failed.";
+  } finally {
     dialogCreate.disabled = false;
   }
 });
-
-$("menuNew").addEventListener("click", () => openProjectDialog("create"));
-$("menuImport").addEventListener("click", () => openProjectDialog("import"));
 
 // ----- tasks -----
 function renderDiff(text) {
@@ -1789,7 +2480,7 @@ function addStep(event) {
       toggle.className = "link";
 
       const paint = () => {
-        text.textContent = open ? full : full.slice(0, LIMIT) + "…";
+        text.textContent = open ? full : full.slice(0, LIMIT) + "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦";
         toggle.textContent = open ? "show less" : "show more";
       };
 
@@ -1810,7 +2501,7 @@ function addStep(event) {
   function tick() {
     if (running) {
       taskMeta.textContent =
-        stepCount + (stepCount === 1 ? " step" : " steps") + " · " + formatElapsed();
+        stepCount + (stepCount === 1 ? " step" : " steps") + " Ãƒâ€šÃ‚Â· " + formatElapsed();
     }
   }
 
@@ -1827,7 +2518,7 @@ function addStep(event) {
       tick();
     } else {
       taskMeta.textContent = taskStart
-        ? "Finished · " + stepCount + (stepCount === 1 ? " step" : " steps") + " · " + formatElapsed()
+        ? "Finished Ãƒâ€šÃ‚Â· " + stepCount + (stepCount === 1 ? " step" : " steps") + " Ãƒâ€šÃ‚Â· " + formatElapsed()
         : "";
     }
   }
@@ -2013,7 +2704,7 @@ function paintCoreFiles() {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", "Remove " + file.name);
-    remove.textContent = "×";
+    remove.textContent = "ÃƒÆ’Ã¢â‚¬â€";
     remove.addEventListener("click", () => {
       coreFiles = coreFiles.filter(f => f !== file);
       paintCoreFiles();
@@ -2233,8 +2924,12 @@ function applyLayout() {
     item.className = "dock-item";
     item.title = "Open " + name;
     item.setAttribute("aria-label", "Open " + name);
-    item.innerHTML = '<svg class="icon closed" aria-hidden="true"><use href="#i-folder"/></svg>' +
-                     '<svg class="icon open" aria-hidden="true"><use href="#i-folderopen"/></svg><span></span>';
+    const paneIcon = id === "explorer" ? "folder"
+      : id === "assistant" ? "bot"
+      : id === "canvas" ? "browser"
+      : "folder";
+
+    item.innerHTML = icon(paneIcon) + "<span></span>";
     item.querySelector("span").textContent = name;
     item.addEventListener("click", () => toggleMinimized(id));
     dock.appendChild(item);
@@ -2464,3 +3159,9 @@ async function init() {
 }
 
 init();
+
+
+
+
+
+
