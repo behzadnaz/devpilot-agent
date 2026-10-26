@@ -2,6 +2,7 @@
 import inspect
 import json
 import os
+import shutil
 import threading
 import logging
 import time
@@ -702,16 +703,14 @@ def select_folder_dialog():
 
 
 # ---------------------------------------------------------
-# Python + FastAPI starter files
+# Project starter files
 # ---------------------------------------------------------
 
-def create_python_fastapi_starter_files(
-    project_path: Path,
-    summary: str,
-) -> list[Path]:
-    """Create a minimal FastAPI starter without installing dependencies."""
+_NODE_GITIGNORE = "node_modules/\ndist/\n.env\n"
 
-    files = {
+
+def _python_fastapi_files() -> dict[str, str]:
+    return {
         "pyproject.toml": (
             '[project]\n'
             'name = "devpilot-project"\n'
@@ -730,26 +729,272 @@ def create_python_fastapi_starter_files(
             "def read_root():\n"
             '    return {"message": "Welcome to your new project"}\n'
         ),
-        "README.md": (
-            "# Python + FastAPI Project\n\n"
-            f"{summary}\n\n"
-            "## Run locally\n\n"
-            "Install the dependencies in your chosen Python environment, "
-            "then run:\n\n"
-            "```powershell\n"
-            "python -m uvicorn main:app --reload\n"
-            "```\n\n"
-            "Dependencies are not installed automatically by DevPilot.\n"
+    }
+
+
+def _react_files(summary: str) -> dict[str, str]:
+    app_jsx = (
+        "export default function App() {\n"
+        "  return (\n"
+        '    <main style={{ fontFamily: "system-ui", padding: "2rem" }}>\n'
+        "      <h1>DevPilot Project</h1>\n"
+        "      <p>" + (summary or "A project created with DevPilot.") + "</p>\n"
+        "    </main>\n"
+        "  );\n"
+        "}\n"
+    )
+
+    return {
+        "package.json": (
+            '{\n'
+            '  "name": "devpilot-project",\n'
+            '  "private": true,\n'
+            '  "version": "0.1.0",\n'
+            '  "type": "module",\n'
+            '  "scripts": {\n'
+            '    "dev": "vite",\n'
+            '    "build": "vite build",\n'
+            '    "preview": "vite preview"\n'
+            '  },\n'
+            '  "dependencies": {\n'
+            '    "react": "^18.3.1",\n'
+            '    "react-dom": "^18.3.1"\n'
+            '  },\n'
+            '  "devDependencies": {\n'
+            '    "@vitejs/plugin-react": "^4.3.4",\n'
+            '    "vite": "^5.4.11"\n'
+            '  }\n'
+            '}\n'
+        ),
+        "vite.config.js": (
+            'import { defineConfig } from "vite";\n'
+            'import react from "@vitejs/plugin-react";\n\n'
+            "export default defineConfig({\n"
+            "  plugins: [react()],\n"
+            "});\n"
+        ),
+        "index.html": (
+            "<!doctype html>\n"
+            '<html lang="en">\n'
+            "  <head>\n"
+            '    <meta charset="utf-8" />\n'
+            '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+            "    <title>DevPilot Project</title>\n"
+            "  </head>\n"
+            "  <body>\n"
+            '    <div id="root"></div>\n'
+            '    <script type="module" src="/src/main.jsx"></script>\n'
+            "  </body>\n"
+            "</html>\n"
+        ),
+        "src/main.jsx": (
+            'import React from "react";\n'
+            'import ReactDOM from "react-dom/client";\n'
+            'import App from "./App.jsx";\n\n'
+            'ReactDOM.createRoot(document.getElementById("root")).render(\n'
+            "  <React.StrictMode>\n"
+            "    <App />\n"
+            "  </React.StrictMode>,\n"
+            ");\n"
+        ),
+        "src/App.jsx": app_jsx,
+        ".gitignore": _NODE_GITIGNORE,
+    }
+
+
+def _vue_files(summary: str) -> dict[str, str]:
+    app_vue = (
+        "<script setup>\n"
+        'const summary = "' + (summary or "A project created with DevPilot.") + '";\n'
+        "</script>\n\n"
+        "<template>\n"
+        "  <main>\n"
+        "    <h1>DevPilot Project</h1>\n"
+        "    <p>{{ summary }}</p>\n"
+        "  </main>\n"
+        "</template>\n"
+    )
+
+    return {
+        "package.json": (
+            '{\n'
+            '  "name": "devpilot-project",\n'
+            '  "private": true,\n'
+            '  "version": "0.1.0",\n'
+            '  "type": "module",\n'
+            '  "scripts": {\n'
+            '    "dev": "vite",\n'
+            '    "build": "vite build",\n'
+            '    "preview": "vite preview"\n'
+            '  },\n'
+            '  "dependencies": {\n'
+            '    "vue": "^3.5.13"\n'
+            '  },\n'
+            '  "devDependencies": {\n'
+            '    "@vitejs/plugin-vue": "^5.2.1",\n'
+            '    "vite": "^5.4.11"\n'
+            '  }\n'
+            '}\n'
+        ),
+        "vite.config.js": (
+            'import { defineConfig } from "vite";\n'
+            'import vue from "@vitejs/plugin-vue";\n\n'
+            "export default defineConfig({\n"
+            "  plugins: [vue()],\n"
+            "});\n"
+        ),
+        "index.html": (
+            "<!doctype html>\n"
+            '<html lang="en">\n'
+            "  <head>\n"
+            '    <meta charset="utf-8" />\n'
+            '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+            "    <title>DevPilot Project</title>\n"
+            "  </head>\n"
+            "  <body>\n"
+            '    <div id="root"></div>\n'
+            '    <script type="module" src="/src/main.js"></script>\n'
+            "  </body>\n"
+            "</html>\n"
+        ),
+        "src/main.js": (
+            'import { createApp } from "vue";\n'
+            'import App from "./App.vue";\n\n'
+            'createApp(App).mount("#root");\n'
+        ),
+        "src/App.vue": app_vue,
+        ".gitignore": _NODE_GITIGNORE,
+    }
+
+
+def _node_express_files() -> dict[str, str]:
+    return {
+        "package.json": (
+            '{\n'
+            '  "name": "devpilot-project",\n'
+            '  "private": true,\n'
+            '  "version": "0.1.0",\n'
+            '  "scripts": {\n'
+            '    "start": "node server.js"\n'
+            '  },\n'
+            '  "dependencies": {\n'
+            '    "express": "^4.21.2"\n'
+            '  }\n'
+            '}\n'
+        ),
+        "server.js": (
+            'const express = require("express");\n\n'
+            "const app = express();\n"
+            "const port = 3000;\n\n"
+            'app.get("/", (req, res) => {\n'
+            '  res.json({ message: "Welcome to your new project" });\n'
+            "});\n\n"
+            "app.listen(port, () => {\n"
+            "  console.log(`Server listening on http://localhost:${port}`);\n"
+            "});\n"
+        ),
+        ".gitignore": _NODE_GITIGNORE,
+    }
+
+
+def _static_web_files(summary: str) -> dict[str, str]:
+    return {
+        "index.html": (
+            "<!doctype html>\n"
+            '<html lang="en">\n'
+            "  <head>\n"
+            '    <meta charset="utf-8" />\n'
+            '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+            "    <title>DevPilot Project</title>\n"
+            '    <link rel="stylesheet" href="styles.css" />\n'
+            "  </head>\n"
+            "  <body>\n"
+            "    <main>\n"
+            "      <h1>DevPilot Project</h1>\n"
+            "      <p>" + (summary or "A project created with DevPilot.") + "</p>\n"
+            "    </main>\n"
+            '    <script src="app.js"></script>\n'
+            "  </body>\n"
+            "</html>\n"
+        ),
+        "styles.css": (
+            "body {\n"
+            '  font-family: system-ui, sans-serif;\n'
+            "  margin: 0;\n"
+            "}\n\n"
+            "main {\n"
+            "  padding: 2rem;\n"
+            "  max-width: 720px;\n"
+            "  margin: 0 auto;\n"
+            "}\n"
+        ),
+        "app.js": (
+            'console.log("DevPilot project ready");\n'
         ),
     }
 
-    created_files = []
+
+def _starter_readme(
+    summary: str,
+    stack_lines: list[str],
+    structure_lines: list[str],
+    run_sections: list[tuple[str, list[str]]],
+) -> str:
+    parts = [
+        "# DevPilot Project",
+        "",
+        summary or "A project created with DevPilot.",
+        "",
+    ]
+
+    if stack_lines:
+        parts.append("## Stack")
+        parts.extend(f"- {line}" for line in stack_lines)
+        parts.append("")
+
+    if structure_lines:
+        parts.append("## Project structure")
+        parts.extend(f"- {line}" for line in structure_lines)
+        parts.append("")
+
+    if run_sections:
+        parts.append("## Run locally")
+
+        for title, steps in run_sections:
+            parts.append(f"### {title}")
+            parts.append("```powershell")
+            parts.extend(steps)
+            parts.append("```")
+            parts.append("")
+
+    parts.append("Dependencies are not installed automatically by DevPilot.")
+
+    return "\n".join(parts) + "\n"
+
+
+def _write_starter_files(
+    project_path: Path,
+    files: dict[str, str],
+) -> dict[str, list[str]]:
+    """Create starter files without overwriting anything.
+
+    Files that already exist in the target folder are left untouched and
+    reported as skipped, so creating into a used folder still succeeds.
+    """
+
+    created: list[str] = []
+    skipped: list[str] = []
 
     try:
         for filename, content in files.items():
             file_path = project_path / filename
 
-            # Exclusive creation prevents overwriting existing files.
+            if file_path.exists():
+                skipped.append(filename)
+                continue
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
             with file_path.open(
                 "x",
                 encoding="utf-8",
@@ -757,20 +1002,141 @@ def create_python_fastapi_starter_files(
             ) as file:
                 file.write(content)
 
-            created_files.append(file_path)
+            created.append(filename)
 
     except Exception:
-        for file_path in reversed(created_files):
+        for filename in created:
             try:
-                file_path.unlink()
+                (project_path / filename).unlink()
             except OSError:
                 logger.warning(
                     "Could not remove incomplete starter file: %s",
-                    file_path,
+                    filename,
                 )
         raise
 
-    return created_files
+    return {"created": created, "skipped": skipped}
+
+
+def create_starter_files_for_project(
+    project_path: Path,
+    request: "ProjectRequest",
+) -> dict[str, list[str]]:
+    """Scaffold starter files matching the project's stack selection."""
+
+    stack = request.stack.strip()
+    app_type = (request.app_type.strip() or "web").lower()
+    frontend_stack = request.frontend_stack.strip()
+    backend_stack = request.backend_stack.strip()
+
+    backend_text = f"{stack} {backend_stack}".lower()
+    frontend_text = f"{stack} {frontend_stack}".lower()
+
+    backend_kind = None
+    if any(keyword in backend_text for keyword in ("fastapi", "python")):
+        backend_kind = "python-fastapi"
+    elif any(keyword in backend_text for keyword in ("express", "node")):
+        backend_kind = "node-express"
+
+    frontend_kind = None
+    if "react" in frontend_text:
+        frontend_kind = "react"
+    elif "vue" in frontend_text:
+        frontend_kind = "vue"
+
+    # When the project has both a backend and a frontend selection, each
+    # scaffold lives in its own folder; a single selection stays at the root.
+    split_layout = bool(backend_kind and frontend_kind)
+    backend_dir = "backend" if split_layout else ""
+    frontend_dir = "frontend" if split_layout else ""
+
+    scaffold: dict[str, str] = {}
+    structure_lines: list[str] = []
+    run_sections: list[tuple[str, list[str]]] = []
+
+    def place(directory: str, files: dict[str, str]) -> None:
+        for filename, content in files.items():
+            name = f"{directory}/{filename}" if directory else filename
+            scaffold[name] = content
+
+    if backend_kind == "python-fastapi":
+        place(backend_dir, _python_fastapi_files())
+        structure_lines.append(
+            f"{backend_dir + '/' if backend_dir else ''}"
+            "Python + FastAPI service"
+            " (main.py, pyproject.toml)"
+        )
+        steps = []
+        if backend_dir:
+            steps.append(f"cd {backend_dir}")
+        steps.extend([
+            'pip install fastapi "uvicorn[standard]"',
+            "python -m uvicorn main:app --reload",
+        ])
+        run_sections.append(("Python + FastAPI", steps))
+    elif backend_kind == "node-express":
+        place(backend_dir, _node_express_files())
+        structure_lines.append(
+            f"{backend_dir + '/' if backend_dir else ''}"
+            "Node.js + Express service"
+            " (server.js, package.json)"
+        )
+        steps = []
+        if backend_dir:
+            steps.append(f"cd {backend_dir}")
+        steps.extend(["npm install", "npm start"])
+        run_sections.append(("Node.js + Express", steps))
+
+    if frontend_kind == "react":
+        place(frontend_dir, _react_files(request.summary.strip()))
+        structure_lines.append(
+            f"{frontend_dir + '/' if frontend_dir else ''}"
+            "React app"
+            " (Vite, package.json, index.html, src/)"
+        )
+        steps = []
+        if frontend_dir:
+            steps.append(f"cd {frontend_dir}")
+        steps.extend(["npm install", "npm run dev"])
+        run_sections.append(("React (Vite)", steps))
+    elif frontend_kind == "vue":
+        place(frontend_dir, _vue_files(request.summary.strip()))
+        structure_lines.append(
+            f"{frontend_dir + '/' if frontend_dir else ''}"
+            "Vue app"
+            " (Vite, package.json, index.html, src/)"
+        )
+        steps = []
+        if frontend_dir:
+            steps.append(f"cd {frontend_dir}")
+        steps.extend(["npm install", "npm run dev"])
+        run_sections.append(("Vue (Vite)", steps))
+
+    if not scaffold and app_type == "web":
+        place("", _static_web_files(request.summary.strip()))
+        run_sections.append(("Static web app", ["Open index.html in a browser"]))
+
+    stack_lines = [f"App type: {app_type}"]
+    for label, value in (
+        ("Stack", stack),
+        ("Frontend", frontend_stack),
+        ("Backend", backend_stack),
+        ("Database", request.database_stack.strip()),
+        ("Testing", request.testing_stack.strip()),
+        ("Deployment", request.deployment_stack.strip()),
+    ):
+        if value:
+            stack_lines.append(f"{label}: {value}")
+
+    # A README is always created, even when no scaffold matched the stack.
+    scaffold["README.md"] = _starter_readme(
+        request.summary.strip(),
+        stack_lines,
+        structure_lines if split_layout else [],
+        run_sections,
+    )
+
+    return _write_starter_files(project_path, scaffold)
 
 
 # ---------------------------------------------------------
@@ -1220,49 +1586,22 @@ def create_app(
                     detail="Could not create project directory.",
                 ) from exc
 
-        created_files = []
+        scaffold_result = {"created": [], "skipped": []}
 
-        # Only scaffold the explicitly recognized Python + FastAPI stack.
-        if stack.lower() in {
-            "python",
-            "python + fastapi",
-            "python fastapi",
-            "fastapi",
-        }:
-            try:
-                created_files = create_python_fastapi_starter_files(
-                    requested_path,
-                    summary,
-                )
-            except OSError as exc:
-                if created_directory:
-                    try:
-                        requested_path.rmdir()
-                    except OSError:
-                        logger.warning(
-                            "Could not remove incomplete project directory: %s",
-                            requested_path,
-                        )
+        try:
+            scaffold_result = create_starter_files_for_project(
+                requested_path,
+                request,
+            )
+        except Exception as exc:
+            if created_directory:
+                shutil.rmtree(requested_path, ignore_errors=True)
 
-                raise HTTPException(
-                    status_code=500,
-                    detail="Could not create project starter files.",
-                ) from exc
-            except Exception as exc:
-                if created_directory:
-                    try:
-                        requested_path.rmdir()
-                    except OSError:
-                        logger.warning(
-                            "Could not remove incomplete project directory: %s",
-                            requested_path,
-                        )
-
-                logger.exception("Could not create project starter files")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Could not create project starter files.",
-                ) from exc
+            logger.warning("Could not create project starter files: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail="Could not create project starter files.",
+            ) from exc
 
         try:
             project_registry.add_project(
@@ -1283,46 +1622,34 @@ def create_app(
                 },
             )
         except ValueError as exc:
-            for file_path in reversed(created_files):
+            for filename in reversed(scaffold_result["created"]):
                 try:
-                    file_path.unlink()
+                    (requested_path / filename).unlink()
                 except OSError:
                     logger.warning(
                         "Could not remove unregistered starter file: %s",
-                        file_path,
+                        filename,
                     )
 
             if created_directory:
-                try:
-                    requested_path.rmdir()
-                except OSError:
-                    logger.warning(
-                        "Could not remove unregistered project directory: %s",
-                        requested_path,
-                    )
+                shutil.rmtree(requested_path, ignore_errors=True)
 
             raise HTTPException(
                 status_code=409,
                 detail=str(exc),
             ) from exc
         except Exception as exc:
-            for file_path in reversed(created_files):
+            for filename in reversed(scaffold_result["created"]):
                 try:
-                    file_path.unlink()
+                    (requested_path / filename).unlink()
                 except OSError:
                     logger.warning(
                         "Could not remove unregistered starter file: %s",
-                        file_path,
+                        filename,
                     )
 
             if created_directory:
-                try:
-                    requested_path.rmdir()
-                except OSError:
-                    logger.warning(
-                        "Could not remove unregistered project directory: %s",
-                        requested_path,
-                    )
+                shutil.rmtree(requested_path, ignore_errors=True)
 
             logger.exception("Could not register project %s", project_id)
             raise HTTPException(
@@ -1330,7 +1657,12 @@ def create_app(
                 detail="Could not register project.",
             ) from exc
 
-        return {"id": project_id, "workflow": workflow}
+        return {
+            "id": project_id,
+            "workflow": workflow,
+            "created_files": scaffold_result["created"],
+            "skipped_files": scaffold_result["skipped"],
+        }
 
     @web_app.delete("/projects/{project_id}")
     def delete_project(project_id: str):
@@ -1353,8 +1685,9 @@ def create_app(
         ).expanduser().resolve()
 
         if (
-            project_path == workspace_root
-            or not project_path.is_relative_to(workspace_root)
+            project_path == Path(project_path.anchor)
+            or project_path == workspace_root
+            or project_path in workspace_root.parents
             or project_path == PROJECT_ROOT
             or project_path in PROJECT_ROOT.parents
             or PROJECT_ROOT in project_path.parents
@@ -1362,8 +1695,8 @@ def create_app(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Project folder must be inside the workspace "
-                    "and cannot be a protected folder."
+                    "Project folder cannot be a filesystem root, "
+                    "workspace root, or protected DevPilot folder."
                 ),
             )
 

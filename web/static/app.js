@@ -1071,13 +1071,15 @@ async function loadProjects() {
     for (const project of projects) {
       const item = document.createElement("li");
 
-      // Open project button
+      // Open project button with the icon of its stack selection
       const openButton = document.createElement("button");
       openButton.type = "button";
       openButton.dataset.id = project.id;
       openButton.className =
         project.id === selectedProjectId ? "active" : "";
-      openButton.innerHTML = icon("folder");
+      openButton.innerHTML = project.stack
+        ? stackIcon(project.stack)
+        : icon("folder");
       openButton.append(document.createTextNode(project.id));
 
       openButton.addEventListener("click", () => {
@@ -1118,11 +1120,15 @@ async function loadProjects() {
 
         try {
           // Stop the task if this project is currently running
-          if (selectedProjectId === project.id && running) {
-            await postJson("/tasks/stop", {
-              project_id: project.id
-            });
-          }
+              if (selectedProjectId === project.id && running) {
+                try {
+                  await postJson("/tasks/stop", {
+                    project_id: project.id
+                  });
+                } catch (error) {
+                  console.error("Could not stop the project task before deletion:", error);
+                }
+              }
 
           // Delete the project
           const deleteResponse = await fetch(
@@ -1357,6 +1363,7 @@ async function openProjectDialog(mode) {
   dialogNameInput.value = "";
   $("projectSummary").value = "";
   idPreview.textContent = "";
+  dialogStatus.classList.remove("error");
   dialogStatus.textContent = "";
   dialogCreate.disabled = false;
   projectPath.value = "";
@@ -2343,16 +2350,24 @@ dialogCreate.addEventListener("click", async () => {
   }
 
   dialogCreate.disabled = true;
+  dialogStatus.classList.remove("error");
   dialogStatus.textContent = "Creating project...";
 
   try {
-    const stack = chosenStack();
+    // Compose the stack label from the wizard's stack selections so the
+    // project list can show the matching stack icon.
+    const stack = [
+      $("backendStack").value.trim(),
+      $("frontendStack").value.trim(),
+    ]
+      .filter(Boolean)
+      .join(" + ");
 
-    await postJson("/projects", {
+    const result = await postJson("/projects", {
       id,
       path,
       summary: $("projectSummary").value.trim(),
-      stack: stack?.name || "",
+      stack,
       workflow: "software_development",
       app_type:
         projectDialog.querySelector('input[name="appType"]:checked')?.value || "web",
@@ -2367,11 +2382,20 @@ dialogCreate.addEventListener("click", async () => {
 
     remember("devpilot.folder", path);
 
+    const skipped = result.skipped_files || [];
+    if (skipped.length) {
+      listStatus.textContent =
+        `Project "${id}" created. Kept existing: ${skipped.join(", ")}`;
+    }
+
     projectDialog.close();
     await loadProjects();
     await selectProject(id);
   } catch (error) {
-    dialogStatus.textContent = error.message || "Request failed.";
+    dialogStatus.classList.add("error");
+    dialogStatus.textContent =
+      error.message || "Request failed.";
+    dialogStatus.scrollIntoView({ block: "nearest" });
   } finally {
     dialogCreate.disabled = false;
   }

@@ -1,0 +1,243 @@
+warning: in the working copy of 'web/static/app.css', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/web/static/app.css b/web/static/app.css[m
+[1mindex 9418194..d776342 100644[m
+[1m--- a/web/static/app.css[m
+[1m+++ b/web/static/app.css[m
+[36m@@ -1,4 +1,4 @@[m
+[31m-:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }[m
+[32m+[m[32m﻿:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }[m
+ [m
+ :root {[m
+   --bg: #f3f5fa; --card: #ffffff; --soft: #eef1f8; --text: #151a2d; --muted: #5b6478; --line: #d9deea;[m
+[36m@@ -369,7 +369,7 @@[m [mh2 .icon, h3 .icon { margin-right: 8px; }[m
+ .tree li.file { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E"); }[m
+ [m
+ /* ---- top bar ---- */[m
+[31m-.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); }[m
+[32m+[m[32m.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 0; }[m
+ .topbar-in { display: flex; align-items: center; gap: 6px; max-width: 1240px; margin: 0 auto; padding: 8px 20px; }[m
+ .topbar button, .topbar a { margin: 0; }[m
+ [m
+[36m@@ -378,7 +378,7 @@[m [mh2 .icon, h3 .icon { margin-right: 8px; }[m
+ [m
+ [m
+ /* ---- top bar ---- */[m
+[31m-.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); }[m
+[32m+[m[32m.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 0; }[m
+ .topbar-in { display: flex; align-items: center; gap: 6px; max-width: 1240px; margin: 0 auto; padding: 8px 20px; }[m
+ .topbar button, .topbar a { margin: 0; }[m
+ [m
+[36m@@ -462,7 +462,7 @@[m [mdialog .actions { margin-top: 14px; }[m
+ [m
+ /* ---- single page workspace ---- */[m
+ .topbar-in { max-width: none; }[m
+[31m-.shell { padding: 0px 16px 16px; }[m
+[32m+[m[32m.shell { padding: 0px 16px 16px 0; }[m
+ .workspace { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 14px; height: calc(100vh - 80px); }[m
+ .left { display: flex; flex-direction: column; gap: 14px; min-height: 0; }[m
+ .panel { flex: 1 1 42%; min-height: 0; overflow: auto; margin: 0; }[m
+[36m@@ -667,24 +667,73 @@[m [mtextarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }[m
+ .splitter.off::before, .splitter.off::after { display: none; }[m
+ [m
+ /* ---- full width, and narrow panels stay tidy ---- */[m
+[31m-main.shell { max-width: none; }[m
+[32m+[m[32mmain.shell {[m
+[32m+[m[32m  max-width: none;[m
+[32m+[m[32m}[m
+ [m
+[31m-.pane { container-type: inline-size; container-name: pane; }[m
+[31m-.pane-body { container-type: inline-size; container-name: body; }[m
+[31m-.pane-title { min-width: 0; }[m
+[31m-.pane-name { overflow: hidden; text-overflow: ellipsis; }[m
+[31m-.pane-tools { flex: none; }[m
+[32m+[m[32m/* Shared responsive sizing for every workspace pane */[m
+[32m+[m[32m.pane {[m
+[32m+[m[32m  container-type: inline-size;[m
+[32m+[m[32m  container-name: pane;[m
+[32m+[m[32m  --pane-scale: 1;[m
+[32m+[m[32m  font-size: calc(14px * var(--pane-scale));[m
+[32m+[m[32m}[m
+ [m
+[31m-@container pane (max-width: 250px) {[m
+[31m-  .tool[data-act="earlier"], .tool[data-act="later"] { display: none; }[m
+[32m+[m[32m.pane-body {[m
+[32m+[m[32m  container-type: inline-size;[m
+[32m+[m[32m  container-name: body;[m
+[32m+[m[32m  min-width: 0;[m
+ }[m
+ [m
+[31m-@container body (max-width: 340px) {[m
+[31m-  #viewTabs .seg-btn { font-size: 0; padding: 7px 9px !important; }[m
+[31m-  #viewTabs .seg-btn .icon { width: 18px; height: 18px; margin: 0; }[m
+[31m-  #viewTabs .seg-btn .dot { margin-left: 4px; }[m
+[32m+[m[32m/* Slightly reduce sizing in narrow panes */[m
+[32m+[m[32m@container pane (max-width: 300px) {[m
+[32m+[m[32m  .pane {[m
+[32m+[m[32m    --pane-scale: 0.9;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/* Slightly increase sizing in wider panes */[m
+[32m+[m[32m@container pane (min-width: 500px) {[m
+[32m+[m[32m  .pane {[m
+[32m+[m[32m    --pane-scale: 1.05;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/* Prevent icons from shrinking or distorting */[m
+[32m+[m[32m.pane .icon {[m
+[32m+[m[32m  flex-shrink: 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m.pane-title {[m
+[32m+[m[32m  min-width: 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m.pane-name {[m
+[32m+[m[32m  overflow: hidden;[m
+[32m+[m[32m  text-overflow: ellipsis;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m.pane-tools {[m
+[32m+[m[32m  flex: none;[m
+ }[m
+ [m
+[32m+[m[32m/* Keep the existing compact View tabs behavior */[m
+[32m+[m[32m@container body (max-width: 340px) {[m
+[32m+[m[32m  #viewTabs .seg-btn {[m
+[32m+[m[32m    font-size: 0;[m
+[32m+[m[32m    padding: 7px 9px !important;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  #viewTabs .seg-btn .icon {[m
+[32m+[m[32m    width: 18px;[m
+[32m+[m[32m    height: 18px;[m
+[32m+[m[32m    margin: 0;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  #viewTabs .seg-btn .dot {[m
+[32m+[m[32m    margin-left: 4px;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+ /* ---- Consistent workspace sizing across browsers ---- */[m
+ .workspace {[m
+   --base-h: calc(100vh - 80px);[m
+[36m@@ -815,44 +864,41 @@[m [mmain.shell { max-width: none; }[m
+ }[m
+ [m
+ [m
+[32m+[m[32m/* Dock container */[m
+ .dock {[m
+[31m-  flex: 0 0 60px;[m
+[31m-  width: 60px;[m
+[31m-  min-height: calc(100vh - 100px);[m
+[32m+[m[32m  flex: 0 0 48px;[m
+[32m+[m[32m  width: 48px;[m
+[32m+[m[32m  height: var(--base-h);[m
+[32m+[m[32m  min-height: 0;[m
+[32m+[m[32m  box-sizing: border-box;[m
+   position: sticky;[m
+   top: 12px;[m
+[31m-  align-self: flex-start;[m
+[32m+[m[32m  align-self: stretch;[m
+   display: flex;[m
+   flex-direction: column;[m
+   align-items: center;[m
+[31m-  gap: 10px;[m
+[31m-  padding: 12px 7px;[m
+[32m+[m[32m  gap: 6px;[m
+[32m+[m[32m  padding: 8px 3px;[m
+   background: var(--card);[m
+   border: 1px solid var(--line);[m
+[31m-  border-radius: 18px;[m
+[32m+[m[32m  border-top: 0;[m
+[32m+[m[32m  border-radius: 0 4px 4px 0;[m
+   box-shadow: 0 5px 18px rgb(0 0 0 / 6%);[m
+ }[m
+ [m
+[32m+[m[32m/* Dock buttons */[m
+ .dock-item {[m
+[31m-  position: relative;[m
+[31m-  margin: 0;[m
+[31m-  width: 44px;[m
+[31m-  min-height: 44px;[m
+[31m-  padding: 9px;[m
+[32m+[m[32m  width: 40px;[m
+[32m+[m[32m  min-height: 40px;[m
+[32m+[m[32m  padding: 4px 1px;[m
+[32m+[m[32m  border-radius: 4px;[m
+   display: flex;[m
+[32m+[m[32m  flex-direction: column;[m
+   align-items: center;[m
+   justify-content: center;[m
+[31m-  background: transparent;[m
+[31m-  color: var(--muted);[m
+[31m-  border: 1px solid transparent;[m
+[31m-  border-radius: 13px;[m
+[31m-  font-size: 0;[m
+[31m-  cursor: pointer;[m
+[31m-  transition:[m
+[31m-    background-color 160ms ease,[m
+[31m-    color 160ms ease,[m
+[31m-    border-color 160ms ease,[m
+[31m-    transform 160ms ease;[m
+[32m+[m[32m  gap: 2px;[m
+[32m+[m[32m  font-size: 9px;[m
+[32m+[m[32m  line-height: 1.1;[m
+ }[m
+ [m
+ .dock-item:hover,[m
+[36m@@ -870,8 +916,8 @@[m [mmain.shell { max-width: none; }[m
+ }[m
+ [m
+ .dock-item .icon {[m
+[31m-  width: 23px;[m
+[31m-  height: 23px;[m
+[32m+[m[32m  width: 16px;[m
+[32m+[m[32m  height: 16px;[m
+   margin: 0;[m
+   flex-shrink: 0;[m
+ }[m
+[36m@@ -1565,7 +1611,7 @@[m [mdialog.project-wizard {[m
+ }[m
+ [m
+ [m
+[31m-/* App Type cards â€” match DevPilot UI preview */[m
+[32m+[m[32m/* App Type cards Ã¢â‚¬â€ match DevPilot UI preview */[m
+ .app-type-grid {[m
+   display: grid;[m
+   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));[m
+[36m@@ -1665,7 +1711,7 @@[m [mdialog.project-wizard {[m
+ }[m
+ [m
+ [m
+[31m-/* Stack section â€” match DevPilot UI preview */[m
+[32m+[m[32m/* Stack section Ã¢â‚¬â€ match DevPilot UI preview */[m
+ [m
+ .stack-source-options {[m
+   display: grid;[m
+[36m@@ -1788,7 +1834,7 @@[m [mdialog.project-wizard {[m
+ }[m
+ [m
+ [m
+[31m-/* Environment Setup â€” match DevPilot UI preview */[m
+[32m+[m[32m/* Environment Setup Ã¢â‚¬â€ match DevPilot UI preview */[m
+ [m
+ .environment-refresh {[m
+   display: inline-flex;[m
+[36m@@ -2128,7 +2174,7 @@[m [mdialog.project-wizard {[m
+ [m
+ /* Project wizard introduction */[m
+ [m
+[31m-/* Project wizard introduction â€” compact spacing */[m
+[32m+[m[32m/* Project wizard introduction Ã¢â‚¬â€ compact spacing */[m
+ .wizard-intro {[m
+   padding: 10px 14px;[m
+   margin: 0 0 8px;[m
+[36m@@ -2585,4 +2631,4 @@[m [mdialog.project-wizard {[m
+   direction: ltr;[m
+   margin-left: 0;[m
+   margin-right: 2px;[m
+[31m-}[m
+\ No newline at end of file[m
+[32m+[m[32m}[m

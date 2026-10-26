@@ -179,6 +179,8 @@ class _AppTest:
         assert response.json() == {
             "id": "my-new-project",
             "workflow": "development",
+            "created_files": ["index.html", "styles.css", "app.js", "README.md"],
+            "skipped_files": [],
         }
         assert (
             registry.projects["my-new-project"]["path"]
@@ -343,6 +345,214 @@ class _AppTest:
         assert (chosen_folder / "main.py").exists()
         assert (chosen_folder / "pyproject.toml").exists()
         assert (chosen_folder / "README.md").exists()
+
+    def test_wizard_react_selection_scaffolds_react_app(self, tmp_path):
+        chosen_folder = tmp_path / "ReactApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        # The wizard sends empty `stack` and fills frontend_stack instead.
+        response = client.post(
+            "/projects",
+            json={
+                "id": "react-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A dashboard for tracking tasks.",
+                "app_type": "web",
+                "stack": "",
+                "frontend_stack": "React",
+                "backend_stack": "",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        assert (chosen_folder / "package.json").is_file()
+        assert (chosen_folder / "vite.config.js").is_file()
+        assert (chosen_folder / "index.html").is_file()
+        assert (chosen_folder / "src" / "main.jsx").is_file()
+        assert (chosen_folder / "src" / "App.jsx").is_file()
+        assert (chosen_folder / ".gitignore").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        package_json = (chosen_folder / "package.json").read_text(
+            encoding="utf-8"
+        )
+        app_jsx = (chosen_folder / "src" / "App.jsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert "react" in package_json.lower()
+        assert "vite" in package_json.lower()
+        assert "A dashboard for tracking tasks." in app_jsx
+
+    def test_wizard_vue_selection_scaffolds_vue_app(self, tmp_path):
+        chosen_folder = tmp_path / "VueApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "vue-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A notes application.",
+                "app_type": "web",
+                "frontend_stack": "Vue",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "src" / "App.vue").is_file()
+        assert (chosen_folder / "src" / "main.js").is_file()
+
+        package_json = (chosen_folder / "package.json").read_text(
+            encoding="utf-8"
+        )
+        assert "vue" in package_json.lower()
+
+    def test_wizard_fullstack_selection_scaffolds_split_layout(self, tmp_path):
+        chosen_folder = tmp_path / "FullstackApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "fullstack-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A shop with API and UI.",
+                "app_type": "web",
+                "frontend_stack": "React",
+                "backend_stack": "Python + FastAPI",
+                "database_stack": "PostgreSQL",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        assert (chosen_folder / "backend" / "main.py").is_file()
+        assert (chosen_folder / "backend" / "pyproject.toml").is_file()
+        assert (chosen_folder / "frontend" / "src" / "App.jsx").is_file()
+        assert (chosen_folder / "frontend" / "package.json").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        readme = (chosen_folder / "README.md").read_text(encoding="utf-8")
+        assert "Backend: Python + FastAPI" in readme
+        assert "Frontend: React" in readme
+        assert "Database: PostgreSQL" in readme
+
+    def test_wizard_express_selection_scaffolds_express_service(self, tmp_path):
+        chosen_folder = tmp_path / "ExpressApi"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "express-api",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A small JSON API.",
+                "app_type": "api",
+                "backend_stack": "Node.js + Express",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "server.js").is_file()
+        assert (chosen_folder / "package.json").is_file()
+
+        server_js = (chosen_folder / "server.js").read_text(encoding="utf-8")
+        assert "express" in server_js.lower()
+
+    def test_web_app_type_without_stack_scaffolds_static_site(self, tmp_path):
+        chosen_folder = tmp_path / "StaticSite"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "static-site",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A landing page.",
+                "app_type": "web",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "index.html").is_file()
+        assert (chosen_folder / "styles.css").is_file()
+        assert (chosen_folder / "app.js").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+    def test_create_into_folder_with_existing_files_skips_them(self, tmp_path):
+        chosen_folder = tmp_path / "ExistingFolder"
+        chosen_folder.mkdir()
+        (chosen_folder / "pyproject.toml").write_text(
+            "[project]\nname = 'user-file'\n",
+            encoding="utf-8",
+        )
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "existing-folder",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "Into a used folder.",
+                "stack": "Python + FastAPI",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        # The user's file survives untouched; missing starters are created.
+        assert "user-file" in (chosen_folder / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+        assert (chosen_folder / "main.py").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        assert response.json()["skipped_files"] == ["pyproject.toml"]
+        assert set(response.json()["created_files"]) == {"main.py", "README.md"}
 
     def test_duplicate_project_creation_returns_conflict(self, tmp_path):
         registry = _ProjectRegistryStub(
@@ -918,7 +1128,7 @@ class _AppTest:
         assert project_path.is_dir()
         assert "my-project" in registry.projects
 
-    def test_delete_project_rejects_path_outside_workspace(
+    def test_delete_project_allows_registered_path_outside_workspace(
         self, tmp_path, monkeypatch
     ):
         workspace = tmp_path / "workspace"
@@ -926,6 +1136,9 @@ class _AppTest:
 
         outside_path = tmp_path / "private-project"
         outside_path.mkdir()
+
+        recycle_bin = tmp_path / "recycle-bin"
+        recycle_bin.mkdir()
 
         registry = _ProjectRegistryStub(
             projects={
@@ -936,13 +1149,16 @@ class _AppTest:
             }
         )
 
-        def unexpected_trash_call(path):
-            raise AssertionError("An outside folder must never be moved")
+        def fake_send2trash(path):
+            shutil.move(
+                str(path),
+                str(recycle_bin / Path(path).name),
+            )
 
         monkeypatch.setattr(
             web_app_module,
             "send2trash",
-            unexpected_trash_call,
+            fake_send2trash,
             raising=False,
         )
 
@@ -955,9 +1171,11 @@ class _AppTest:
 
         response = client.delete("/projects/private-project")
 
-        assert response.status_code == 400
-        assert outside_path.is_dir()
-        assert "private-project" in registry.projects
+        assert response.status_code == 200
+        assert response.json() == {"deleted": "private-project"}
+        assert not outside_path.exists()
+        assert (recycle_bin / "private-project").is_dir()
+        assert "private-project" not in registry.projects
 
     def test_project_prompt_prioritizes_existing_technology_before_installing(self):
         prompt = web_app_module.SYSTEM_PROMPT.lower()

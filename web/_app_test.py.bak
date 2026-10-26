@@ -1,0 +1,2538 @@
+import shutil
+import web.app as web_app_module
+
+from pathlib import Path
+from app.tool_schemas import ToolSchemas
+from fastapi.testclient import TestClient
+from app._llm_stub import _LLMStub, final_message, tool_call
+from app.approval import ApprovalManager
+from app.events import EventStream
+from web._agent_stub import _AgentStub
+from web._project_registry_stub import _ProjectRegistryStub
+from web.app import create_app, app
+
+class _AppTest:
+    def test_start_task_request_streams_the_events(self):
+        agent = _AgentStub()
+        client = TestClient(create_app(agent, start=lambda job: job()))
+
+        started = client.post(
+            "/tasks",
+            json={"message": "Create a calculator"},
+        )
+        everything = client.get("/events").json()
+        rest = client.get("/events", params={"after": 1}).json()
+
+        assert started.status_code == 200
+        assert agent.run_called_with == "Create a calculator"
+        assert everything == {
+            "events": [
+                {"type": "status", "text": "step 1 of 20"},
+                {"type": "message", "text": "Done"},
+            ],
+            "next": 2,
+        }
+        assert rest == {
+            "events": [{"type": "message", "text": "Done"}],
+            "next": 2,
+        }
+
+    def test_the_page_is_served(self):
+        client = TestClient(create_app(_AgentStub()))
+
+        page = client.get("/")
+
+        assert page.status_code == 200
+        assert 'id="projectMessage"' in page.text
+        assert 'id="steps"' in page.text
+
+    def test_task_is_sent_to_the_selected_project_agent(self):
+        planning_agent = _AgentStub()
+        development_agent = _AgentStub()
+        registry = _ProjectRegistryStub(
+            agents={
+                "planning": planning_agent,
+                "development": development_agent,
+            }
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "development",
+                "message": "Write a unit test",
+            },
+        )
+
+        assert response.status_code == 200
+        assert development_agent.run_called_with == "Write a unit test"
+        assert planning_agent.run_called_with is None
+
+    def test_unknown_project_does_not_run_any_agent(self):
+        planning_agent = _AgentStub()
+        development_agent = _AgentStub()
+        registry = _ProjectRegistryStub(
+            agents={
+                "planning": planning_agent,
+                "development": development_agent,
+            }
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "unknown-project",
+                "message": "Change a function",
+            },
+        )
+
+        assert response.status_code == 404
+        assert planning_agent.run_called_with is None
+        assert development_agent.run_called_with is None
+
+    def test_lists_registered_projects(self):
+        registry = _ProjectRegistryStub(
+            projects={
+                "devpilot": {"workflow": "development"},
+                "my-project": {"workflow": "planning"},
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
+
+        response = client.get("/projects")
+
+        assert response.status_code == 200
+
+        assert response.json() == {
+            "projects": [
+                {
+                    "id": "devpilot",
+                    "workflow": "development",
+                    "summary": "",
+                    "stack": "",
+                    "app_type": "web",
+                    "frontend_stack": "",
+                    "backend_stack": "",
+                    "database_stack": "",
+                    "testing_stack": "",
+                    "security_stack": "",
+                    "deployment_stack": "",
+                    "scaling_stack": "",
+                },
+                {
+                    "id": "my-project",
+                    "workflow": "planning",
+                    "summary": "",
+                    "stack": "",
+                    "app_type": "web",
+                    "frontend_stack": "",
+                    "backend_stack": "",
+                    "database_stack": "",
+                    "testing_stack": "",
+                    "security_stack": "",
+                    "deployment_stack": "",
+                    "scaling_stack": "",
+                },
+            ]
+        }
+
+    def test_creates_project_outside_configured_workspace(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+        workspace.mkdir()
+
+        chosen_folder = tmp_path / "Documents" / "MyNewProject"
+        chosen_folder.mkdir(parents=True)
+
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "my-new-project",
+                "path": str(chosen_folder),
+                "workflow": "development",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json() == {
+            "id": "my-new-project",
+            "workflow": "development",
+        }
+        assert (
+            registry.projects["my-new-project"]["path"]
+            == chosen_folder.resolve()
+        )
+
+
+    def test_creates_project_in_new_directory_with_summary_and_stack(
+        self, tmp_path
+    ):
+        chosen_folder = (
+            tmp_path / "Documents" / "ClinicBooking"
+        )
+
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=tmp_path / "DevPilot-Workspace",
+            )
+        )
+
+        assert not chosen_folder.exists()
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "clinic-booking",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A booking website for a small clinic.",
+                "stack": "Python + FastAPI",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert chosen_folder.is_dir()
+
+        saved = registry.projects["clinic-booking"]
+        assert saved["path"] == chosen_folder.resolve()
+        assert saved["summary"] == (
+            "A booking website for a small clinic."
+        )
+        assert saved["stack"] == "Python + FastAPI"
+
+
+    def test_language_check_reports_python_runtime(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get(
+            "/languages/check",
+            params={"stack": "Python + FastAPI"},
+        )
+
+        assert response.status_code == 200, response.text
+
+        result = response.json()
+        assert result["runtime"] == "Python"
+        assert isinstance(result["installed"], bool)
+        assert "version" in result
+        assert result["no_install"] is False
+
+    def test_language_check_does_not_require_runtime_for_html_css(
+        self, tmp_path
+    ):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get(
+            "/languages/check",
+            params={"stack": "HTML + CSS"},
+        )
+
+        assert response.status_code == 200, response.text
+
+        result = response.json()
+        assert result["no_install"] is True
+        assert result["installed"] is True
+
+    def test_creates_python_fastapi_starter_files_without_installing_dependencies(
+        self, tmp_path
+    ):
+        chosen_folder = tmp_path / "ClinicBooking"
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=tmp_path / "DevPilot-Workspace",
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "clinic-booking",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A booking website for a small clinic.",
+                "stack": "Python + FastAPI",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "pyproject.toml").is_file()
+        assert (chosen_folder / "main.py").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        pyproject = (chosen_folder / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+        main_py = (chosen_folder / "main.py").read_text(
+            encoding="utf-8"
+        )
+        readme = (chosen_folder / "README.md").read_text(
+            encoding="utf-8"
+        )
+
+        assert "fastapi" in pyproject.lower()
+        assert "uvicorn" in pyproject.lower()
+        assert "FastAPI" in main_py
+        assert "A booking website for a small clinic." in readme
+        assert "Python + FastAPI" in readme
+
+    def test_creates_python_starter_files_when_stack_is_python(self, tmp_path):
+        chosen_folder = tmp_path / "PythonProject"
+        registry = _ProjectRegistryStub()
+
+        client = TestClient(
+            create_app(
+                agent=_AgentStub(),
+                start=lambda *args, **kwargs: None,
+                project_registry=registry,
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "python-project",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A simple Python application.",
+                "stack": "Python",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "main.py").exists()
+        assert (chosen_folder / "pyproject.toml").exists()
+        assert (chosen_folder / "README.md").exists()
+
+    def test_wizard_react_selection_scaffolds_react_app(self, tmp_path):
+        chosen_folder = tmp_path / "ReactApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        # The wizard sends empty `stack` and fills frontend_stack instead.
+        response = client.post(
+            "/projects",
+            json={
+                "id": "react-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A dashboard for tracking tasks.",
+                "app_type": "web",
+                "stack": "",
+                "frontend_stack": "React",
+                "backend_stack": "",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        assert (chosen_folder / "package.json").is_file()
+        assert (chosen_folder / "vite.config.js").is_file()
+        assert (chosen_folder / "index.html").is_file()
+        assert (chosen_folder / "src" / "main.jsx").is_file()
+        assert (chosen_folder / "src" / "App.jsx").is_file()
+        assert (chosen_folder / ".gitignore").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        package_json = (chosen_folder / "package.json").read_text(
+            encoding="utf-8"
+        )
+        app_jsx = (chosen_folder / "src" / "App.jsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert "react" in package_json.lower()
+        assert "vite" in package_json.lower()
+        assert "A dashboard for tracking tasks." in app_jsx
+
+    def test_wizard_vue_selection_scaffolds_vue_app(self, tmp_path):
+        chosen_folder = tmp_path / "VueApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "vue-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A notes application.",
+                "app_type": "web",
+                "frontend_stack": "Vue",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "src" / "App.vue").is_file()
+        assert (chosen_folder / "src" / "main.js").is_file()
+
+        package_json = (chosen_folder / "package.json").read_text(
+            encoding="utf-8"
+        )
+        assert "vue" in package_json.lower()
+
+    def test_wizard_fullstack_selection_scaffolds_split_layout(self, tmp_path):
+        chosen_folder = tmp_path / "FullstackApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "fullstack-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A shop with API and UI.",
+                "app_type": "web",
+                "frontend_stack": "React",
+                "backend_stack": "Python + FastAPI",
+                "database_stack": "PostgreSQL",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        assert (chosen_folder / "backend" / "main.py").is_file()
+        assert (chosen_folder / "backend" / "pyproject.toml").is_file()
+        assert (chosen_folder / "frontend" / "src" / "App.jsx").is_file()
+        assert (chosen_folder / "frontend" / "package.json").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+        readme = (chosen_folder / "README.md").read_text(encoding="utf-8")
+        assert "Backend: Python + FastAPI" in readme
+        assert "Frontend: React" in readme
+        assert "Database: PostgreSQL" in readme
+
+    def test_wizard_express_selection_scaffolds_express_service(self, tmp_path):
+        chosen_folder = tmp_path / "ExpressApi"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "express-api",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A small JSON API.",
+                "app_type": "api",
+                "backend_stack": "Node.js + Express",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "server.js").is_file()
+        assert (chosen_folder / "package.json").is_file()
+
+        server_js = (chosen_folder / "server.js").read_text(encoding="utf-8")
+        assert "express" in server_js.lower()
+
+    def test_web_app_type_without_stack_scaffolds_static_site(self, tmp_path):
+        chosen_folder = tmp_path / "StaticSite"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "static-site",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A landing page.",
+                "app_type": "web",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert (chosen_folder / "index.html").is_file()
+        assert (chosen_folder / "styles.css").is_file()
+        assert (chosen_folder / "app.js").is_file()
+        assert (chosen_folder / "README.md").is_file()
+
+    def test_duplicate_project_creation_returns_conflict(self, tmp_path):
+        registry = _ProjectRegistryStub(
+            projects={
+                "devpilot": {
+                    "path": tmp_path / "devpilot",
+                    "workflow": "development",
+                }
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "devpilot",
+                "path": str(tmp_path / "replacement"),
+                "workflow": "planning",
+            },
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == (
+            "Project already exists: devpilot"
+        )
+
+    def test_creates_workspace_through_api(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+        client = TestClient(create_app(projects_root=workspace))
+
+        response = client.post(
+            "/workspace",
+            json={"path": str(workspace)},
+        )
+
+        assert response.status_code == 201
+        assert response.json() == {"path": str(workspace)}
+        assert workspace.is_dir()
+
+    def test_selects_project_folder_through_native_dialog(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            web_app_module,
+            "select_folder_dialog",
+            lambda: str(tmp_path),
+            raising=False,
+        )
+        client = TestClient(create_app(projects_root=tmp_path))
+
+        response = client.get("/select-folder")
+
+        assert response.status_code == 200
+        assert response.json() == {"path": str(tmp_path)}
+
+    def test_agent_core_accepts_message_without_creating_project(
+        self, tmp_path
+    ):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={"message": "Explain your architecture"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "started": True,
+            "scope": "agent_core",
+        }
+        assert agent_core.run_called_with == "Explain your architecture"
+        assert client.get("/agent-core/events").json()["events"] == [
+            {"type": "status", "text": "step 1 of 20"},
+            {"type": "message", "text": "Done"},
+        ]
+        assert client.get("/events").json()["events"] == []
+
+    def test_page_has_separate_agent_core_and_project_chats(self):
+        client = TestClient(create_app(_AgentStub()))
+
+        page = client.get("/")
+
+        assert page.status_code == 200
+        assert 'id="agentCoreMessage"' in page.text
+        assert 'id="projectMessage"' in page.text
+        assert 'id="projectLog"' in page.text
+
+    def test_approval_endpoint_accepts_a_decision(self):
+        client = TestClient(create_app(_AgentStub()))
+
+        response = client.post(
+            "/approvals/test-request",
+            json={"approved": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "request_id": "test-request",
+            "approved": False,
+        }
+
+    def test_shared_ai_api_returns_502_when_capability_fails(self):
+        class FailingAICapabilities:
+            def execute(self, capability, inputs, context=None):
+                raise RuntimeError("Internal AI failure")
+
+        client = TestClient(
+            create_app(ai_capabilities=FailingAICapabilities())
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == (
+            "The AI capability request failed."
+        )
+
+    def test_approval_endpoint_resolves_pending_request(self):
+        manager = ApprovalManager()
+        request_id = manager.create_request(
+            action="create_file",
+            details={"path": "example.txt"},
+        )
+        client = TestClient(
+            create_app(_AgentStub(), approval_manager=manager)
+        )
+
+        response = client.post(
+            f"/approvals/{request_id}",
+            json={"approved": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "request_id": request_id,
+            "approved": False,
+        }
+        assert manager.wait_for_decision(request_id) is False
+
+    def test_pending_approvals_endpoint_returns_unresolved_requests(self):
+        manager = ApprovalManager()
+        request_id = manager.create_request(
+            action="delete_file",
+            details={"path": "example.txt"},
+        )
+        client = TestClient(
+            create_app(agent=None, approval_manager=manager)
+        )
+
+        response = client.get("/approvals")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "requests": [
+                {
+                    "request_id": request_id,
+                    "action": "delete_file",
+                    "details": {"path": "example.txt"},
+                }
+            ]
+        }
+
+    def test_build_project_registry_returns_the_configured_projects(
+        self, tmp_path
+    ):
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=_LLMStub([]),
+        )
+
+        assert registry.get_config("demo")["path"] == tmp_path
+        assert registry.get_agent("demo") is not None
+
+    def test_agents_of_the_registry_can_run_the_command_in_limits_yaml(
+        self, tmp_path
+    ):
+        llm = _LLMStub(
+            [
+                tool_call("run_command", command="pytest -q"),
+                final_message("Done."),
+            ]
+        )
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+        events = EventStream()
+
+        registry.get_agent("demo").run("Run the tests", events)
+
+        result = [
+            event.text
+            for event in events.since(0)
+            if event.type == "tool_result"
+        ][0]
+        assert "exit code" in result
+
+    def test_chat_request_models_preserve_message_mode_and_tags(self):
+        agent_core_request = web_app_module.AgentCoreRequest(
+            message="Explain the architecture",
+            mode="ask",
+            tags=["ask"],
+        )
+        project_request = web_app_module.TaskRequest(
+            message="Change the login function",
+            project_id="demo",
+            mode="change",
+            tags=["change"],
+        )
+
+        assert agent_core_request.mode == "ask"
+        assert agent_core_request.tags == ["ask"]
+        assert project_request.mode == "change"
+        assert project_request.tags == ["change"]
+
+    def test_task_forwards_message_mode_and_tags_to_selected_agent(self):
+        development_agent = _AgentStub()
+        registry = _ProjectRegistryStub(
+            agents={"development": development_agent}
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "development",
+                "message": "Update the login function",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert development_agent.run_called_with == "Update the login function"
+        assert development_agent.run_mode == "change"
+        assert development_agent.run_tags == ["change"]
+
+    def test_agent_core_forwards_message_mode_and_tags(self, tmp_path):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={
+                "message": "Explain the architecture",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert agent_core.run_called_with == "Explain the architecture"
+        assert agent_core.run_mode == "ask"
+        assert agent_core.run_tags == ["ask"]
+
+    def test_agent_core_uploads_file(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent_core=_AgentStub(),
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/files",
+            files={
+                "file": (
+                    "notes.txt",
+                    b"The application uses FastAPI.",
+                    "text/plain",
+                )
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"]
+        assert data["name"] == "notes.txt"
+
+    def test_project_task_publishes_error_when_agent_crashes(self):
+        class FailingAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                raise RuntimeError("Simulated Ollama failure")
+
+        registry = _ProjectRegistryStub(
+            agents={"default": FailingAgent()}
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={"project_id": "default", "message": "hi"},
+        )
+
+        assert response.status_code == 200
+        events = client.get("/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Agent failed: Simulated Ollama failure",
+        }
+
+    def test_agent_core_publishes_error_when_agent_crashes(self, tmp_path):
+        class FailingAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                raise RuntimeError("Simulated Ollama failure")
+
+        client = TestClient(
+            create_app(
+                agent_core=FailingAgent(),
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={"message": "hi"},
+        )
+
+        assert response.status_code == 200
+        events = client.get("/agent-core/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Agent failed: Simulated Ollama failure",
+        }
+
+    def test_project_ai_backend_receives_exact_frontend_message(self):
+        project_agent = _AgentStub()
+        registry = _ProjectRegistryStub(
+            agents={"development": project_agent}
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        frontend_payload = {
+            "project_id": "development",
+            "message": "Please explain the login function.",
+            "mode": "ask",
+            "tags": ["ask"],
+        }
+
+        response = client.post("/tasks", json=frontend_payload)
+
+        assert response.status_code == 200
+        assert project_agent.run_called_with == (
+            "Please explain the login function."
+        )
+        assert project_agent.run_mode == "ask"
+        assert project_agent.run_tags == ["ask"]
+
+    def test_agent_core_backend_receives_exact_frontend_message(self, tmp_path):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        frontend_payload = {
+            "message": "Please explain the Agent Core architecture.",
+            "mode": "ask",
+            "tags": ["ask"],
+        }
+
+        response = client.post(
+            "/agent-core/tasks",
+            json=frontend_payload,
+        )
+
+        assert response.status_code == 200
+        assert agent_core.run_called_with == (
+            "Please explain the Agent Core architecture."
+        )
+        assert agent_core.run_mode == "ask"
+        assert agent_core.run_tags == ["ask"]
+
+    def test_deletes_project_and_its_folder(self, tmp_path):
+        project_folder = tmp_path / "my-project"
+        project_folder.mkdir()
+        (project_folder / "main.py").write_text(
+            "print('hello')", encoding="utf-8"
+        )
+
+        another_folder = tmp_path / "another-project"
+        another_folder.mkdir()
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "my-project": {
+                    "path": str(project_folder),
+                    "workflow": "software_development",
+                },
+                "another-project": {
+                    "path": str(another_folder),
+                    "workflow": "software_development",
+                },
+            }
+        )
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.delete("/projects/my-project")
+
+        assert response.status_code == 200
+        assert "my-project" not in registry.projects
+        assert "another-project" in registry.projects
+        assert not project_folder.exists()
+        assert another_folder.is_dir()
+
+    def test_shared_ai_api_returns_503_when_capabilities_are_missing(self):
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == (
+            "AI capabilities are not configured."
+        )
+
+    def test_delete_project_moves_folder_to_recycle_bin_and_removes_it_from_explore(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        project_path = workspace / "my-project"
+        other_path = workspace / "other-project"
+        recycle_bin = tmp_path / "recycle-bin"
+
+        project_path.mkdir(parents=True)
+        other_path.mkdir()
+        recycle_bin.mkdir()
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "my-project": {
+                    "path": project_path,
+                    "workflow": "software-development",
+                },
+                "other-project": {
+                    "path": other_path,
+                    "workflow": "software-development",
+                },
+            }
+        )
+
+        def fake_send2trash(path):
+            shutil.move(str(path), str(recycle_bin / Path(path).name))
+
+        monkeypatch.setattr(
+            web_app_module,
+            "send2trash",
+            fake_send2trash,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.delete("/projects/my-project")
+
+        assert response.status_code == 200
+        assert response.json() == {"deleted": "my-project"}
+        assert not project_path.exists()
+        assert (recycle_bin / "my-project").is_dir()
+        assert other_path.is_dir()
+        assert "my-project" not in registry.projects
+        assert "other-project" in registry.projects
+
+        listed = client.get("/projects").json()["projects"]
+        assert [project["id"] for project in listed] == ["other-project"]
+
+    def test_failed_project_deletion_keeps_project_registered(
+        self, tmp_path, monkeypatch
+    ):
+        workspace = tmp_path / "workspace"
+        project_path = workspace / "my-project"
+        project_path.mkdir(parents=True)
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "my-project": {
+                    "path": project_path,
+                    "workflow": "software-development",
+                }
+            }
+        )
+
+        def fail_to_send_to_trash(path):
+            raise OSError("Recycle Bin operation failed")
+
+        monkeypatch.setattr(
+            web_app_module,
+            "send2trash",
+            fail_to_send_to_trash,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.delete("/projects/my-project")
+
+        assert response.status_code == 500
+        assert project_path.is_dir()
+        assert "my-project" in registry.projects
+
+        def test_delete_project_allows_registered_path_outside_workspace(
+                self, tmp_path, monkeypatch
+        ):
+            workspace = tmp_path / "workspace"
+            workspace.mkdir()
+
+            outside_path = tmp_path / "private-project"
+            outside_path.mkdir()
+
+            recycle_bin = tmp_path / "recycle-bin"
+            recycle_bin.mkdir()
+
+            registry = _ProjectRegistryStub(
+                projects={
+                    "private-project": {
+                        "path": outside_path,
+                        "workflow": "software-development",
+                    }
+                }
+            )
+
+            def fake_send2trash(path):
+                shutil.move(
+                    str(path),
+                    str(recycle_bin / Path(path).name),
+                )
+
+            monkeypatch.setattr(
+                web_app_module,
+                "send2trash",
+                fake_send2trash,
+                raising=False,
+            )
+
+            client = TestClient(
+                create_app(
+                    project_registry=registry,
+                    projects_root=workspace,
+                )
+            )
+
+            response = client.delete("/projects/private-project")
+
+            assert response.status_code == 200
+            assert response.json() == {"deleted": "private-project"}
+            assert not outside_path.exists()
+            assert (recycle_bin / "private-project").is_dir()
+            assert "private-project" not in registry.projects
+
+        def unexpected_trash_call(path):
+            raise AssertionError("An outside folder must never be moved")
+
+        monkeypatch.setattr(
+            web_app_module,
+            "send2trash",
+            unexpected_trash_call,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.delete("/projects/private-project")
+
+        assert response.status_code == 400
+        assert outside_path.is_dir()
+        assert "private-project" in registry.projects
+
+    def test_project_prompt_prioritizes_existing_technology_before_installing(self):
+        prompt = web_app_module.SYSTEM_PROMPT.lower()
+
+        assert "inspect the existing project" in prompt
+        assert "reuse" in prompt
+        assert "dependencies" in prompt
+        assert "approval" in prompt
+
+    def test_project_prompt_requires_stack_assessment_before_recommending(self):
+        prompt = web_app_module.SYSTEM_PROMPT.lower()
+
+        assert "frameworks" in prompt
+        assert "available tools" in prompt
+        assert "before recommending" in prompt
+
+    def test_project_tools_explain_how_to_identify_existing_stack(self):
+        schemas = ToolSchemas.load("config/tools.json").tools
+        descriptions = {
+            tool["function"]["name"]: tool["function"]["description"].lower()
+            for tool in schemas
+        }
+
+        assert "configuration" in descriptions["list_files"]
+        assert "technology stack" in descriptions["read_file"]
+
+    def test_changing_topic_in_open_new_project_refreshes_recommendations(
+            self, tmp_path
+    ):
+        # Arrange
+        client = TestClient(
+            create_app(projects_root=tmp_path)
+        )
+
+        response = client.get("/")
+        assert response.status_code == 200
+
+        # Act and assert:
+        # Submit topic A, capture its recommendations,
+        # submit topic B without closing the panel,
+        # and verify recommendations are regenerated for topic B.
+
+    def test_reopening_new_project_generates_fresh_recommendations(
+            self, tmp_path
+    ):
+        # Arrange
+        client = TestClient(
+            create_app(projects_root=tmp_path)
+        )
+
+        # Act: open the project creation panel.
+        first_response = client.get("/")
+
+        # Open the page again as a new project panel.
+        second_response = client.get("/")
+
+        # Assert
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+
+    def test_reopening_new_project_starts_with_fresh_recommendations(
+        self, tmp_path
+    ):
+        client = TestClient(
+            create_app(projects_root=tmp_path)
+        )
+
+        first_response = client.get("/")
+        second_response = client.get("/")
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+
+    def test_stack_advice_uses_limited_generation_options(self, monkeypatch):
+        class FakeLLM:
+            def __init__(self):
+                self.ask_kwargs = None
+
+            def ask(self, prompt, **kwargs):
+                self.ask_kwargs = kwargs
+                return """
+                               {
+                                   "frontend": "React",
+                                   "backend": "FastAPI",
+                                   "database": "PostgreSQL",
+                                   "testing": "pytest",
+                                   "security": "OAuth2",
+                                   "deployment": "Docker",
+                                   "scaling": "Horizontal scaling",
+                                   "reason": "Simple architecture for the bookstore."
+                               }
+                               """
+
+        fake_llm = FakeLLM()
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: fake_llm,
+        )
+
+        web_app_module.generate_stack_advice(
+            "Build a simple bookstore"
+        )
+
+        assert fake_llm.ask_kwargs["options"]["num_predict"] == 1024
+        assert fake_llm.ask_kwargs["think"] is False
+
+
+    def test_stack_advice_returns_options_for_selected_component(
+        self, monkeypatch
+    ):
+        class FakeLLM:
+            def ask(self, prompt, **kwargs):
+                assert "frontend" in prompt.lower()
+                assert "version" in prompt.lower()
+                return """
+                {
+                    "suggestions": [
+                        "React -19",
+                        "Vue -3.5",
+                        "Angular -20"
+                    ]
+                }
+                """
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: FakeLLM(),
+        )
+
+        result = web_app_module.generate_stack_advice(
+            "Build a task management web application",
+            target_component="frontend",
+        )
+
+        assert result == [
+            "React -19",
+            "Vue -3.5",
+            "Angular -20",
+        ]
+
+    def test_stack_advice_returns_seven_architecture_components(
+            self, monkeypatch
+    ):
+        class FakeLLM:
+            def ask(self, prompt, **kwargs):
+                return """
+                    {
+                        "frontend": "React",
+                        "backend": "FastAPI",
+                        "database": "PostgreSQL",
+                        "testing": "pytest",
+                        "security": "OAuth2",
+                        "deployment": "Docker",
+                        "scaling": "Horizontal scaling",
+                        "reason": "Fits a growing web application."
+                    }
+                    """
+
+        monkeypatch.setattr(
+            web_app_module,
+            "load_model_settings",
+            lambda: object(),
+        )
+        monkeypatch.setattr(
+            web_app_module,
+            "create_llm_client",
+            lambda settings: FakeLLM(),
+        )
+
+        result = web_app_module.generate_stack_advice(
+            "Build a task management web application"
+        )
+
+        assert isinstance(result, dict)
+        assert result["frontend"] == "React"
+        assert result["backend"] == "FastAPI"
+        assert result["database"] == "PostgreSQL"
+        assert result["testing"] == "pytest"
+        assert result["security"] == "OAuth2"
+        assert result["deployment"] == "Docker"
+        assert result["scaling"] == "Horizontal scaling"
+        assert result["reason"] == "Fits a growing web application."
+
+    def test_stack_advice_endpoint_returns_recommendations(self):
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                assert description == (
+                    "Build a task management web application"
+                )
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": (
+                        "Provides a Python backend and a modern frontend."
+                    ),
+                }
+
+        client = TestClient(
+            create_app(
+                stack_advisor=FakeStackAdvisor(),
+                project_registry=_ProjectRegistryStub(),
+            )
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={
+                "description": (
+                    "Build a task management web application"
+                )
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+                "architecture": {
+                "frontend": "React",
+                "backend": "FastAPI",
+                "database": "PostgreSQL",
+                "testing": "pytest",
+                "security": "JWT authentication",
+                "deployment": "Docker",
+                "scaling": "Horizontal scaling",
+                "reason": (
+                    "Provides a Python backend and a modern frontend."
+                ),
+            }
+        }
+
+    def test_stack_advice_endpoint_returns_recommendations(self, tmp_path):
+        project_path = tmp_path / "task-manager"
+        project_path.mkdir()
+
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                assert description == (
+                    "Build a task management web application"
+                )
+                assert project_path is not None
+
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": (
+                        "Provides a Python backend and a modern frontend."
+                    ),
+                }
+
+        registry = _ProjectRegistryStub(
+            projects={
+                "task-manager": {
+                    "path": project_path,
+                    "workflow": "software-development",
+                }
+            }
+        )
+
+        client = TestClient(
+            create_app(
+                stack_advisor=FakeStackAdvisor(),
+                project_registry=registry,
+            )
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={
+                "description": (
+                    "Build a task management web application"
+                ),
+                "project_id": "task-manager",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "architecture": {
+                "frontend": "React",
+                "backend": "FastAPI",
+                "database": "PostgreSQL",
+                "testing": "pytest",
+                "security": "JWT authentication",
+                "deployment": "Docker",
+                "scaling": "Horizontal scaling",
+                "reason": (
+                    "Provides a Python backend and a modern frontend."
+                ),
+            }
+        }
+
+    def test_stack_advice_rejects_empty_description(self):
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/stack-advice",
+            json={"description": "   "},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == (
+            "Project description is required."
+        )
+
+    def test_stack_advice_returns_error_when_advisor_fails(self):
+        class FailingStackAdvisor:
+            def __call__(self, description):
+                raise RuntimeError("AI service unavailable")
+
+        client = TestClient(
+            create_app(stack_advisor=FailingStackAdvisor())
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={"description": "Build an online bookstore"},
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == (
+            "Could not generate stack recommendations."
+        )
+
+    def test_changing_topic_in_open_new_project_can_submit_new_task(
+        self, tmp_path
+    ):
+        messages = []
+
+        class FakeAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                messages.append(message)
+
+        def run_immediately(job):
+            job()
+
+        client = TestClient(
+            create_app(
+                agent=FakeAgent(),
+                start=run_immediately,
+                projects_root=tmp_path,
+            )
+        )
+
+        first_response = client.post(
+            "/tasks",
+            json={
+                "message": "Build a task management application",
+                "project_id": "default",
+            },
+        )
+
+        second_response = client.post(
+            "/tasks",
+            json={
+                "message": "Build an AI document analysis application",
+                "project_id": "default",
+            },
+        )
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert messages == [
+            "Build a task management application",
+            "Build an AI document analysis application",
+        ]
+
+    def test_stack_advice_uses_selected_project_path(self, tmp_path):
+        project_path = tmp_path / "bookstore"
+        project_path.mkdir()
+        (project_path / "package.json").write_text(
+            '{"dependencies": {"react": "^18.0.0"}}',
+            encoding="utf-8",
+        )
+
+        class FakeProjectRegistry:
+            def get_config(self, project_id):
+                assert project_id == "bookstore"
+                return {
+                    "path": project_path,
+                    "workflow": "software-development",
+                }
+
+        class FakeStackAdvisor:
+            def __init__(self):
+                self.description = None
+                self.project_path = None
+
+            def __call__(self, description, project_path=None):
+                self.description = description
+                self.project_path = project_path
+                return {
+                    "frontend": "React",
+                    "backend": "Existing backend",
+                    "database": "Existing database",
+                    "testing": "Existing test suite",
+                    "security": "Existing security controls",
+                    "deployment": "Existing deployment",
+                    "scaling": "Review current capacity",
+                    "reason": "Reuse the existing React dependency.",
+                }
+
+        advisor = FakeStackAdvisor()
+        client = TestClient(
+            create_app(
+                project_registry=FakeProjectRegistry(),
+                stack_advisor=advisor,
+            )
+        )
+
+        response = client.post(
+            "/stack-advice",
+            json={
+                "description": "Build an online bookstore",
+                "project_id": "bookstore",
+            },
+        )
+
+        assert response.status_code == 200
+        assert advisor.description == "Build an online bookstore"
+        assert advisor.project_path == project_path.resolve()
+
+    def test_shared_ai_api_forwards_context_to_capability(self):
+        class FakeAICapabilities:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, capability, inputs, context=None):
+                self.calls.append(
+                    {
+                        "capability": capability,
+                        "inputs": inputs,
+                        "context": context,
+                    }
+                )
+                return {"answer": "Recommendation based on context"}
+
+        capabilities = FakeAICapabilities()
+        client = TestClient(
+            create_app(ai_capabilities=capabilities)
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+                "context": {
+                    "project_id": "bookstore",
+                    "current_component": "technology-stack",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {
+                "answer": "Recommendation based on context"
+            }
+        }
+        assert capabilities.calls[0]["context"] == {
+            "project_id": "bookstore",
+            "current_component": "technology-stack",
+        }
+
+    def test_frontend_uses_shared_ai_for_stack_recommendations(self):
+        client = TestClient(create_app())
+
+        response = client.get("/static/app.js")
+
+        assert response.status_code == 200
+        assert "requestAI(" in response.text
+        assert '"stack-recommendations"' in response.text
+
+
+    def test_shared_ai_api_does_not_start_project_or_agent_core_tasks(self):
+        class FakeAICapabilities:
+            def execute(self, capability, inputs, context=None):
+                return {"handled_by": "shared-capability"}
+
+        class FakeAgent:
+            def __init__(self):
+                self.calls = []
+
+            def run(self, message, events, **kwargs):
+                self.calls.append(message)
+
+        project_agent = FakeAgent()
+        agent_core = FakeAgent()
+
+        client = TestClient(
+            create_app(
+                agent=project_agent,
+                agent_core=agent_core,
+                ai_capabilities=FakeAICapabilities(),
+            )
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {"description": "Build a bookstore"},
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {"handled_by": "shared-capability"}
+        }
+        assert project_agent.calls == []
+        assert agent_core.calls == []
+
+    def test_shared_ai_api_routes_request_to_requested_capability(self):
+        class FakeAICapabilities:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, capability, inputs, context=None):
+                self.calls.append(
+                    {
+                        "capability": capability,
+                        "inputs": inputs,
+                        "context": context,
+                    }
+                )
+                return {
+                        "architecture": {
+                        "frontend": "React",
+                        "backend": "FastAPI",
+                        "database": "PostgreSQL",
+                        "testing": "pytest",
+                        "security": "JWT authentication",
+                        "deployment": "Docker",
+                        "scaling": "Horizontal scaling",
+                        "reason": (
+                            "Suitable for the described application."
+                        ),
+                    }
+                }
+
+        capabilities = FakeAICapabilities()
+        client = TestClient(
+            create_app(ai_capabilities=capabilities)
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {
+                "architecture": {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": (
+                        "Suitable for the described application."
+                    ),
+                }
+            }
+        }
+
+        assert capabilities.calls == [
+            {
+                "capability": "stack-recommendations",
+                "inputs": {
+                    "description": "Build an online bookstore"
+                },
+                "context": None,
+            }
+        ]
+
+    def test_stack_recommendation_renderer_exists(self):
+        app_js = (
+                Path(__file__).parent
+                / "static"
+                / "app.js"
+        ).read_text(encoding="utf-8")
+
+        assert "function renderStackSuggestions(" in app_js
+
+    def test_agent_core_resets_busy_state_on_failed_status(self):
+        app_js = (
+            Path(__file__).parent
+            / "static"
+            / "app.js"
+        ).read_text(encoding="utf-8")
+
+        status_branch = app_js.split(
+            'event.type === "status"',
+            maxsplit=1,
+        )[1].split(
+            'event.type === "error"',
+            maxsplit=1,
+        )[0]
+
+        assert 'event.text === "failed"' in status_branch
+        assert "coreBusy = false;" in status_branch
+        assert "syncCoreSend();" in status_branch
+
+    def test_default_app_configures_shared_ai_capabilities(self):
+        routes = {
+            route.path: route
+            for route in app.routes
+        }
+
+        assert "/ai/request" in routes
+
+    def test_default_app_has_configured_ai_capabilities(self):
+        assert app.state.ai_capabilities is not None
+        assert isinstance(
+            app.state.ai_capabilities,
+            web_app_module.AICapabilities,
+        )
+
+
+    def test_default_app_executes_stack_recommendations(self):
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": "Suitable for the application.",
+                }
+
+        app.state.ai_capabilities.stack_advisor = FakeStackAdvisor()
+
+        try:
+            response = TestClient(app).post(
+                "/ai/request",
+                json={
+                    "capability": "stack-recommendations",
+                    "input": {
+                        "description": "Build an online bookstore"
+                    },
+                },
+            )
+        finally:
+            # Restore the original advisor after the test.
+            app.state.ai_capabilities.stack_advisor = (
+                web_app_module.generate_stack_advice
+            )
+
+        assert response.status_code == 200
+        assert response.json()["result"]["architecture"]["backend"] == "FastAPI"
+        assert response.json()["result"]["architecture"]["database"] == "PostgreSQL"
+
+    def test_default_ai_capabilities_support_stack_recommendations(
+        self, monkeypatch
+    ):
+        class FakeStackAdvisor:
+            def __call__(self, description, project_path=None):
+                assert description == "Build an online bookstore"
+                return {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": "Suitable for the application.",
+                }
+
+        monkeypatch.setattr(
+            web_app_module,
+            "generate_stack_advice",
+            FakeStackAdvisor(),
+        )
+
+        client = TestClient(
+            web_app_module.create_app(
+                ai_capabilities=web_app_module.AICapabilities()
+            )
+        )
+
+        response = client.post(
+            "/ai/request",
+            json={
+                "capability": "stack-recommendations",
+                "input": {
+                    "description": "Build an online bookstore"
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "result": {
+                "architecture": {
+                    "frontend": "React",
+                    "backend": "FastAPI",
+                    "database": "PostgreSQL",
+                    "testing": "pytest",
+                    "security": "JWT authentication",
+                    "deployment": "Docker",
+                    "scaling": "Horizontal scaling",
+                    "reason": "Suitable for the application.",
+                }
+            }
+        }
+
+    def test_live_stack_advice_diagnostic(self):
+        recommendations = web_app_module.generate_stack_advice(
+            "Build a simple online bookstore"
+        )
+
+        print("Stack recommendations:", repr(recommendations))
+
+        assert isinstance(recommendations, dict)
+        required_fields = {
+            "frontend",
+            "backend",
+            "database",
+            "testing",
+            "security",
+            "deployment",
+            "scaling",
+            "reason",
+        }
+        assert required_fields.issubset(recommendations.keys())
+        assert all(
+            isinstance(recommendations[field], str)
+            and recommendations[field].strip()
+            for field in required_fields
+        ), "The architecture recommendation is incomplete"
+
+    def test_project_ask_mode_reaches_real_agent_loop(self, tmp_path):
+        target = tmp_path / "must_not_be_created.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="must_not_be_created.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing files."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Explain the project without changing files",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not target.exists()
+
+    def test_project_ask_mode_reaches_real_agent_loop(self, tmp_path):
+        target = tmp_path / "must_not_be_created.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="must_not_be_created.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing files."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Explain the project without changing files",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not target.exists()
+
+    def test_project_change_mode_allows_file_creation(self, tmp_path):
+        target = tmp_path / "created_by_change_mode.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="created_by_change_mode.py",
+                    content="print('created')",
+                ),
+                final_message("File created successfully."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Create a Python file",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "print('created')"
+
+    def test_agent_core_ask_mode_blocks_file_creation(self, tmp_path):
+        target = tmp_path / "must_not_be_created.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="must_not_be_created.py",
+                    content="print('changed')",
+                ),
+                final_message("I can answer without changing Agent Core."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "agent-core": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            system_prompt=web_app_module.AGENT_CORE_SYSTEM_PROMPT,
+            llm=llm,
+        )
+
+        agent_core = registry.get_agent("agent-core")
+
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={
+                "message": "Explain the code without modifying files",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["scope"] == "agent_core"
+        assert not target.exists()
+
+    def test_agent_core_change_mode_allows_file_creation(self, tmp_path):
+        target = tmp_path / "created_by_agent_core.py"
+
+        llm = _LLMStub(
+            [
+                tool_call(
+                    "create_file",
+                    path="created_by_agent_core.py",
+                    content="print('agent core')",
+                ),
+                final_message("File created successfully."),
+            ]
+        )
+
+        registry = web_app_module.build_project_registry(
+            {
+                "agent-core": {
+                    "path": tmp_path,
+                    "workflow": "software-development",
+                }
+            },
+            system_prompt=web_app_module.AGENT_CORE_SYSTEM_PROMPT,
+            llm=llm,
+        )
+
+        agent_core = registry.get_agent("agent-core")
+
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/agent-core/tasks",
+            json={
+                "message": "Create a Python file",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["scope"] == "agent_core"
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "print('agent core')"
+
+    def test_agent_core_events_recover_when_cursor_is_ahead_of_stream(
+        self, tmp_path
+    ):
+        agent_core = _AgentStub()
+        client = TestClient(
+            create_app(
+                agent_core=agent_core,
+                projects_root=tmp_path,
+                start=lambda job: job(),
+            )
+        )
+
+        client.post(
+            "/agent-core/tasks",
+            json={"message": "Explain the architecture"},
+        )
+
+        response = client.get(
+            "/agent-core/events",
+            params={"after": 99},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "events": [
+                {"type": "status", "text": "step 1 of 20"},
+                {"type": "message", "text": "Done"},
+            ],
+            "next": 2,
+        }
+
+    def test_agent_execution_logs_elapsed_time(self, caplog):
+        import logging
+
+        from app.events import EventStream
+        from web.app import _run_agent_safely
+
+        class StubAgent:
+            def run(self, message, events, mode="ask", tags=None):
+                events.publish("message", "Done")
+
+        with caplog.at_level(logging.INFO, logger="web.app"):
+            _run_agent_safely(
+                StubAgent(),
+                "Test timing",
+                EventStream(),
+            )
+
+        assert "Agent execution finished" in caplog.text
+        assert "seconds" in caplog.text
+
+    def test_project_ask_mode_works_without_existing_workspace(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        llm = _LLMStub([
+            final_message("Ask mode works without a project workspace.")
+        ])
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": workspace,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "What is the difference between a class and an object?",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not workspace.exists()
+
+        events = client.get("/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Ask mode works without a project workspace.",
+        }
+
+    def test_project_change_mode_reports_missing_workspace(self, tmp_path):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        llm = _LLMStub([
+            final_message("Change Code reached the agent.")
+        ])
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": workspace,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "Inspect the project and explain its structure.",
+                "mode": "change",
+                "tags": ["change"],
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = client.get("/events").json()["events"]
+        assert events[-1] == {
+            "type": "message",
+            "text": "Change Code reached the agent.",
+        }
+
+    def test_project_ask_mode_handles_missing_workspace_without_listing_files(
+            self, tmp_path
+    ):
+        workspace = tmp_path / "DevPilot-Workspace"
+
+        llm = _LLMStub([
+            tool_call("list_files", path="."),
+            final_message("A class defines a type; an object is an instance."),
+        ])
+
+        registry = web_app_module.build_project_registry(
+            {
+                "demo": {
+                    "path": workspace,
+                    "workflow": "software-development",
+                }
+            },
+            llm=llm,
+        )
+
+        client = TestClient(
+            create_app(
+                project_registry=registry,
+                projects_root=workspace,
+                start=lambda job: job(),
+            )
+        )
+
+        response = client.post(
+            "/tasks",
+            json={
+                "project_id": "demo",
+                "message": "What is the difference between a class and an object?",
+                "mode": "ask",
+                "tags": ["ask"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert not workspace.exists()
+
+        events = client.get("/events").json()["events"]
+        tool_results = [
+            event["text"]
+            for event in events
+            if event["type"] == "tool_result"
+        ]
+
+        assert not any("No such file or directory" in result for result in tool_results)
+
+    def test_create_project_saves_summary_and_stack(self, tmp_path):
+        folder = tmp_path / "MyNewProject"
+        folder.mkdir()
+
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "my-new-project",
+                "path": str(folder),
+                "workflow": "software_development",
+                "summary": "A booking website for a small clinic.",
+                "stack": "Python + FastAPI",
+                "app_type": "web",
+                "frontend_stack": "React",
+                "backend_stack": "Python + FastAPI",
+                "database_stack": "PostgreSQL",
+                "testing_stack": "pytest + Playwright",
+                "security_stack": "Environment variables + OAuth",
+                "deployment_stack": "Docker + CI/CD",
+                "scaling_stack": "Caching + background workers",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        saved = registry.projects["my-new-project"]
+        assert saved["summary"] == "A booking website for a small clinic."
+        assert saved["stack"] == "Python + FastAPI"
+        assert saved["app_type"] == "web"
+        assert saved["frontend_stack"] == "React"
+        assert saved["backend_stack"] == "Python + FastAPI"
+        assert saved["database_stack"] == "PostgreSQL"
+        assert saved["testing_stack"] == "pytest + Playwright"
+        assert saved["security_stack"] == "Environment variables + OAuth"
+        assert saved["deployment_stack"] == "Docker + CI/CD"
+        assert saved["scaling_stack"] == "Caching + background workers"
+
+    def test_lists_project_summary_and_stack(self, tmp_path):
+        registry = _ProjectRegistryStub(
+            projects={
+                "clinic-booking": {
+                    "workflow": "software_development",
+                    "summary": "A booking website for a small clinic.",
+                    "stack": "Python + FastAPI",
+                    "app_type": "web",
+                    "frontend_stack": "React",
+                    "backend_stack": "Python + FastAPI",
+                    "database_stack": "PostgreSQL",
+                    "testing_stack": "pytest + Playwright",
+                    "security_stack": "Environment variables + OAuth",
+                    "deployment_stack": "Docker + CI/CD",
+                    "scaling_stack": "Caching + background workers",
+                    "path": tmp_path / "clinic-booking",
+                }
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
+
+        response = client.get("/projects")
+
+        assert response.status_code == 200
+        project = response.json()["projects"][0]
+        assert project["id"] == "clinic-booking"
+        assert project["summary"] == "A booking website for a small clinic."
+        assert project["stack"] == "Python + FastAPI"
+        assert project["app_type"] == "web"
+        assert project["frontend_stack"] == "React"
+        assert project["backend_stack"] == "Python + FastAPI"
+        assert project["database_stack"] == "PostgreSQL"
+        assert project["testing_stack"] == "pytest + Playwright"
+        assert project["security_stack"] == "Environment variables + OAuth"
+        assert project["deployment_stack"] == "Docker + CI/CD"
+        assert project["scaling_stack"] == "Caching + background workers"
+
+
+    def test_environment_check_reports_each_selected_technology(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/environment/check",
+            json={
+                "mode": "local",
+                "requirements": [
+                    {
+                        "component": "backend",
+                        "name": "Python",
+                        "version": "3.12",
+                    },
+                    {
+                        "component": "backend",
+                        "name": "FastAPI",
+                        "version": "0.115",
+                    },
+                    {
+                        "component": "database",
+                        "name": "PostgreSQL",
+                        "version": "17",
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+
+        results = response.json()["results"]
+        assert len(results) == 3
+        assert [item["name"] for item in results] == [
+            "Python",
+            "FastAPI",
+            "PostgreSQL",
+        ]
+        assert all(
+            item["status"] in {
+                "installed",
+                "version_mismatch",
+                "not_installed",
+                "check_failed",
+            }
+            for item in results
+        )
+
+    def test_environment_check_uses_local_agent_client(self, tmp_path, monkeypatch):
+        import web.app as app_module
+
+        calls = []
+        expected_results = [
+            {
+                "component": "database",
+                "name": "PostgreSQL",
+                "requested_version": "17",
+                "detected_version": None,
+                "status": "not_installed",
+            }
+        ]
+
+        class FakeLocalEnvironmentClient:
+            def __init__(self):
+                pass
+
+            def check_environment(self, requirements):
+                calls.append(requirements)
+                return {"results": expected_results}
+
+        monkeypatch.setattr(
+            app_module,
+            "LocalEnvironmentClient",
+            FakeLocalEnvironmentClient,
+            raising=False,
+        )
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        requirements = [
+            {
+                "component": "database",
+                "name": "PostgreSQL",
+                "version": "17",
+            }
+        ]
+
+        response = client.post(
+            "/environment/check",
+            json={
+                "mode": "local",
+                "requirements": requirements,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert calls == [requirements]
+        assert response.json() == {"results": expected_results}
+

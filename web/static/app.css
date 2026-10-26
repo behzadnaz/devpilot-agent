@@ -359,7 +359,7 @@ h2 .icon, h3 .icon { margin-right: 8px; }
   width: 14px;
   height: 14px;
   margin-right: 6px;
-  vertical-align: -2px;
+  vertical-align: top;
   background: currentColor;
   -webkit-mask: var(--glyph) center / contain no-repeat;
   mask: var(--glyph) center / contain no-repeat;
@@ -369,7 +369,7 @@ h2 .icon, h3 .icon { margin-right: 8px; }
 .tree li.file { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E"); }
 
 /* ---- top bar ---- */
-.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); }
+.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 0; }
 .topbar-in { display: flex; align-items: center; gap: 6px; max-width: 1240px; margin: 0 auto; padding: 8px 20px; }
 .topbar button, .topbar a { margin: 0; }
 
@@ -378,7 +378,7 @@ h2 .icon, h3 .icon { margin-right: 8px; }
 
 
 /* ---- top bar ---- */
-.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); }
+.topbar { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 0; }
 .topbar-in { display: flex; align-items: center; gap: 6px; max-width: 1240px; margin: 0 auto; padding: 8px 20px; }
 .topbar button, .topbar a { margin: 0; }
 
@@ -462,7 +462,7 @@ dialog .actions { margin-top: 14px; }
 
 /* ---- single page workspace ---- */
 .topbar-in { max-width: none; }
-.shell { padding: 0px 16px 16px; }
+.shell { padding: 0px 16px 16px 0; }
 .workspace { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 14px; height: calc(100vh - 80px); }
 .left { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .panel { flex: 1 1 42%; min-height: 0; overflow: auto; margin: 0; }
@@ -667,24 +667,157 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .splitter.off::before, .splitter.off::after { display: none; }
 
 /* ---- full width, and narrow panels stay tidy ---- */
-main.shell { max-width: none; }
-
-.pane { container-type: inline-size; container-name: pane; }
-.pane-body { container-type: inline-size; container-name: body; }
-.pane-title { min-width: 0; }
-.pane-name { overflow: hidden; text-overflow: ellipsis; }
-.pane-tools { flex: none; }
-
-@container pane (max-width: 250px) {
-  .tool[data-act="earlier"], .tool[data-act="later"] { display: none; }
+main.shell {
+  max-width: none;
 }
 
+/* Shared responsive sizing for every workspace pane */
+.pane {
+  container-type: inline-size;
+  container-name: pane;
+  min-width: 0;
+}
+
+.pane-body {
+  container-type: inline-size;
+  container-name: body;
+  min-width: 0;
+}
+
+/* Compact content when an individual pane becomes narrow */
+@container pane (max-width: 300px) {
+  .pane-head {
+    gap: 4px;
+    padding: 6px 7px;
+  }
+
+  .pane-title {
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .pane-title .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .pane-tools {
+    gap: 0;
+  }
+
+  .pane .tool {
+    width: 24px;
+    height: 24px;
+  }
+
+  .pane .tool .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .pane-body {
+    padding: 8px;
+    font-size: 12px;
+  }
+}
+
+/* Restore comfortable spacing in wider panes */
+@container pane (min-width: 500px) {
+  .pane-head {
+    gap: 10px;
+    padding: 10px 14px;
+  }
+
+  .pane-body {
+    padding: 16px;
+  }
+}
+/* Responsive text and content overflow inside resizable panes */
+.pane,
+.pane-head,
+.pane-body,
+.pane-body > *,
+.chat-pane,
+.chat-log,
+.chat-entry,
+.project-head,
+.panel-head,
+.out-head {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.pane-body,
+.pane-body * {
+  overflow-wrap: anywhere;
+}
+
+.pane-head {
+  min-width: 0;
+}
+
+.pane-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-tools {
+  flex-shrink: 0;
+}
+
+.chat-entry {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.chat-entry pre {
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+}
+
+.chat-entry pre code {
+  white-space: inherit;
+}
+/* Prevent icons from shrinking or distorting */
+.pane .icon {
+  flex-shrink: 0;
+}
+
+.pane-title {
+  min-width: 0;
+}
+
+.pane-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-tools {
+  flex: none;
+}
+
+/* Keep the existing compact View tabs behavior */
 @container body (max-width: 340px) {
-  #viewTabs .seg-btn { font-size: 0; padding: 7px 9px !important; }
-  #viewTabs .seg-btn .icon { width: 18px; height: 18px; margin: 0; }
-  #viewTabs .seg-btn .dot { margin-left: 4px; }
-}
+  #viewTabs .seg-btn {
+    font-size: 0;
+    padding: 7px 9px !important;
+  }
 
+  #viewTabs .seg-btn .icon {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+  }
+
+  #viewTabs .seg-btn .dot {
+    margin-left: 4px;
+  }
+}
 /* ---- Consistent workspace sizing across browsers ---- */
 .workspace {
   --base-h: calc(100vh - 80px);
@@ -815,44 +948,41 @@ main.shell { max-width: none; }
 }
 
 
+/* Dock container */
 .dock {
-  flex: 0 0 60px;
-  width: 60px;
-  min-height: calc(100vh - 100px);
+  flex: 0 0 48px;
+  width: 48px;
+  height: var(--base-h);
+  min-height: 0;
+  box-sizing: border-box;
   position: sticky;
   top: 12px;
-  align-self: flex-start;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 12px 7px;
+  gap: 6px;
+  padding: 8px 3px;
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-top: 0;
+  border-radius: 0 4px 4px 0;
   box-shadow: 0 5px 18px rgb(0 0 0 / 6%);
 }
 
+/* Dock buttons */
 .dock-item {
-  position: relative;
-  margin: 0;
-  width: 44px;
-  min-height: 44px;
-  padding: 9px;
+  width: 40px;
+  min-height: 40px;
+  padding: 4px 1px;
+  border-radius: 4px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid transparent;
-  border-radius: 13px;
-  font-size: 0;
-  cursor: pointer;
-  transition:
-    background-color 160ms ease,
-    color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease;
+  gap: 2px;
+  font-size: 9px;
+  line-height: 1.1;
 }
 
 .dock-item:hover,
@@ -870,8 +1000,8 @@ main.shell { max-width: none; }
 }
 
 .dock-item .icon {
-  width: 23px;
-  height: 23px;
+  width: 16px;
+  height: 16px;
   margin: 0;
   flex-shrink: 0;
 }
@@ -1565,7 +1695,7 @@ dialog.project-wizard {
 }
 
 
-/* App Type cards â€” match DevPilot UI preview */
+/* App Type cards Ã¢â‚¬â€ match DevPilot UI preview */
 .app-type-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -1665,7 +1795,7 @@ dialog.project-wizard {
 }
 
 
-/* Stack section â€” match DevPilot UI preview */
+/* Stack section Ã¢â‚¬â€ match DevPilot UI preview */
 
 .stack-source-options {
   display: grid;
@@ -1788,7 +1918,7 @@ dialog.project-wizard {
 }
 
 
-/* Environment Setup â€” match DevPilot UI preview */
+/* Environment Setup Ã¢â‚¬â€ match DevPilot UI preview */
 
 .environment-refresh {
   display: inline-flex;
@@ -1815,6 +1945,11 @@ dialog.project-wizard {
 .environment-refresh .icon {
   width: 16px;
   height: 16px;
+}
+
+#dialogStatus.error {
+  color: var(--bad);
+  font-weight: 600;
 }
 
 .environment-summary {
@@ -2128,7 +2263,7 @@ dialog.project-wizard {
 
 /* Project wizard introduction */
 
-/* Project wizard introduction â€” compact spacing */
+/* Project wizard introduction Ã¢â‚¬â€ compact spacing */
 .wizard-intro {
   padding: 10px 14px;
   margin: 0 0 8px;
