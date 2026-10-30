@@ -13,7 +13,7 @@ git diff --cached --quiet
 if %errorlevel%==0 (
     git tag -f ui-stable
     echo.
-    echo UI marked as stable (nothing new to commit).
+    echo UI marked as stable -- nothing new to commit.
 ) else (
     git commit -m "Mark UI as stable" >nul
     git tag -f ui-stable
