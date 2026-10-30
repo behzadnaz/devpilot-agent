@@ -155,6 +155,17 @@ class EnvironmentChecker:
 
         return None
 
+    def canonical_name(self, name: str) -> str | None:
+        """Canonical catalog key for a technology name, or None if unknown."""
+
+        spec = self._resolve(name)
+        return spec["key"] if spec else None
+
+    def reset_caches(self) -> None:
+        """Clear cached lookups so the next check sees fresh machine state."""
+
+        self._npm_globals_cache = False
+
     def _detect_version(self, name: str) -> str | None:
         spec = self._resolve(name)
 

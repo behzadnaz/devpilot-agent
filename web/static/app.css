@@ -274,6 +274,35 @@ button.lang small { max-width: 60%; text-align: right; }
 .tree { list-style: none; margin: 8px 0 0; padding: 0; font: 13px ui-monospace, "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }
 .tree ul { list-style: none; margin: 0; padding-left: 14px; border-left: 1px solid var(--line); }
 .tree summary { cursor: pointer; padding: 2px 0; font-weight: 600; }
+.stack-mark {
+  display: inline-flex;
+  flex: none;
+}
+
+.missing-workspace {
+  display: inline-flex;
+  flex: none;
+  margin-left: 6px;
+  color: var(--c-warn);
+}
+
+.missing-workspace .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .tree li.file { padding: 2px 0 2px 4px; }
 .tree li.changed { color: var(--accent); }
 .tree li.changed::after { content: " M"; font-size: 11px; opacity: 0.8; }
@@ -360,7 +389,7 @@ h2 .icon, h3 .icon { margin-right: 8px; }
   height: 14px;
   margin-right: 6px;
   vertical-align: top;
-  background: currentColor;
+  background: var(--glyph-color, currentColor);
   -webkit-mask: var(--glyph) center / contain no-repeat;
   mask: var(--glyph) center / contain no-repeat;
 }
@@ -433,11 +462,20 @@ h2 .icon, h3 .icon { margin-right: 8px; }
 
 .menu { position: relative; }
 
+.menu-list button {
+  gap: 8px;
+  padding: 7px 10px;
+}
+
+.menu-list button .icon:first-child {
+  margin-right: 0;
+}
+
 .menu-list {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  min-width: 200px;
+  min-width: 172px;
   padding: 6px;
   background: var(--card);
   border: 1px solid var(--line);
@@ -1695,7 +1733,7 @@ dialog.project-wizard {
 }
 
 
-/* App Type cards Ã¢â‚¬â€ match DevPilot UI preview */
+/* App Type cards — match DevPilot UI preview */
 .app-type-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -1795,7 +1833,7 @@ dialog.project-wizard {
 }
 
 
-/* Stack section Ã¢â‚¬â€ match DevPilot UI preview */
+/* Stack section — match DevPilot UI preview */
 
 .stack-source-options {
   display: grid;
@@ -1918,7 +1956,7 @@ dialog.project-wizard {
 }
 
 
-/* Environment Setup Ã¢â‚¬â€ match DevPilot UI preview */
+/* Environment Setup — match DevPilot UI preview */
 
 .environment-refresh {
   display: inline-flex;
@@ -1947,9 +1985,47 @@ dialog.project-wizard {
   height: 16px;
 }
 
-#dialogStatus.error {
+#dialogStatus.error,
+#importDialogStatus.error {
   color: var(--bad);
   font-weight: 600;
+}
+
+.install-output {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--soft);
+  font: 11.5px ui-monospace, "Cascadia Code", Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.environment-select {
+  margin: 0;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.environment-action {
+  margin-top: 10px;
+}
+
+.environment-action button {
+  display: inline-flex;
+  margin: 0;
+  padding: 5px 12px;
+  font-size: 12.5px;
+}
+
+.environment-command-line {
+  overflow-wrap: anywhere;
+  font: 11.5px ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--text);
 }
 
 .environment-summary {
@@ -2064,6 +2140,11 @@ dialog.project-wizard {
   border-left-color: var(--muted);
 }
 
+.environment-item[data-status="failed"] {
+  border-left-color: var(--bad);
+  border-left-style: dashed;
+}
+
 .environment-item-head {
   display: flex;
   align-items: center;
@@ -2126,6 +2207,11 @@ dialog.project-wizard {
 .status-pill.unchecked {
   background: var(--soft);
   color: var(--muted);
+}
+
+.status-pill.failed {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  color: var(--bad);
 }
 
 .version-grid {
@@ -2263,7 +2349,7 @@ dialog.project-wizard {
 
 /* Project wizard introduction */
 
-/* Project wizard introduction Ã¢â‚¬â€ compact spacing */
+/* Project wizard introduction — compact spacing */
 .wizard-intro {
   padding: 10px 14px;
   margin: 0 0 8px;
@@ -2399,11 +2485,13 @@ dialog.project-wizard {
   position: relative;
 }
 
-#projectDialog.project-wizard .wizard-header {
+#projectDialog.project-wizard .wizard-header,
+#importDialog.project-wizard .wizard-header {
   position: static;
 }
 
-#projectDialog.project-wizard .dialog-x {
+#projectDialog.project-wizard .dialog-x,
+#importDialog.project-wizard .dialog-x {
   position: absolute;
   top: 16px;
   right: 16px;
@@ -2416,19 +2504,22 @@ dialog.project-wizard {
 
 
 /* New Project wizard header layout */
-#projectDialog.project-wizard .wizard-header {
+#projectDialog.project-wizard .wizard-header,
+#importDialog.project-wizard .wizard-header {
   position: relative;
   display: block;
   padding-right: 0;
 }
 
-#projectDialog.project-wizard .wizard-intro {
+#projectDialog.project-wizard .wizard-intro,
+#importDialog.project-wizard .wizard-intro {
   box-sizing: border-box;
   width: 100%;
   padding: 0 52px 0 0;
 }
 
-#projectDialog.project-wizard .dialog-x {
+#projectDialog.project-wizard .dialog-x,
+#importDialog.project-wizard .dialog-x {
   position: absolute;
   top: 0;
   right: 0;
@@ -2438,7 +2529,8 @@ dialog.project-wizard {
 
 
 /* Remove the panel around the New Project heading and description */
-#projectDialog.project-wizard .wizard-intro {
+#projectDialog.project-wizard .wizard-intro,
+#importDialog.project-wizard .wizard-intro {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
@@ -2500,7 +2592,8 @@ dialog.project-wizard {
 }
 
 /* Hide step numbers in wizard content, but keep them in navigation tabs */
-#projectDialog .wizard-content .step-number {
+#projectDialog .wizard-content .step-number,
+#importDialog .wizard-content .step-number {
   display: none !important;
 }
 

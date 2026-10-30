@@ -11,7 +11,7 @@
   <link rel="icon" type="image/png" href="/resources/robot.png">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
 
-  <link rel="stylesheet" href="/static/app.css?v=2020">
+  <link rel="stylesheet" href="/static/app.css?v=2030">
 
   <script>
     try {
@@ -145,6 +145,12 @@
     </symbol>
     <symbol id="i-clip" viewBox="0 0 24 24">
       <path d="m8 12 7-7a4 4 0 0 1 6 6l-9 9a6 6 0 0 1-9-9l9-9"/>
+    </symbol>
+
+    <symbol id="i-alert" viewBox="0 0 24 24">
+      <path d="M12 3.5 2.5 20h19z"/>
+      <path d="M12 10v4.5"/>
+      <path d="M12 17.5h.01"/>
     </symbol>
 
     <symbol id="i-python" viewBox="0 0 24 24">
@@ -653,7 +659,7 @@
       </div>
 
       <h5 class="subsection-title">Architecture components</h5>
-      <p class="muted">Review the main layers of your application. Final choices should reflect the project requirements.</p>
+      <p class="muted">Optional — describe layers manually or let AI propose them. The final stack selection happens in the Environment step.</p>
 
       <div class="architecture-list">
         
@@ -889,7 +895,7 @@
       <label id="pathLabel" for="projectPath">Project destination directory</label>
       <div class="row workspace-path-row">
         <input id="projectPath" type="text"
-               placeholder="Choose a destination directory"
+               placeholder="Click Browse and select a folder — do not type the path"
                autocomplete="off">
         <button id="browseProject" class="secondary" type="button">
           <svg class="icon"><use href="#i-folder"></use></svg>
@@ -964,44 +970,56 @@
     </button>
   </header>
 
-  <div class="wizard-section">
-    <p class="field-label">Import from</p>
-    <div class="lang-list" role="radiogroup" aria-label="Import source">
-      <label class="lang">
-        <input type="radio" name="importSourceChoice" value="folder" checked>
-        <span>My computer</span>
-        <small>Select an existing project folder</small>
-      </label>
-      <label class="lang">
-        <input type="radio" name="importSourceChoice" value="github">
-        <span>GitHub</span>
-        <small>Read from a repository URL</small>
-      </label>
-    </div>
-    <p class="muted">Your files and folder structure are imported as they are. DevPilot works on a separate branch.</p>
-
-    <div id="importGithubBlock" hidden>
-      <label for="importGithubUrl">Repository URL</label>
-      <input id="importGithubUrl" type="url"
-             placeholder="https://github.com/owner/repo"
-             autocomplete="url">
-    </div>
-
-    <div id="importFolderBlock">
-      <label for="importProjectPath">Project folder</label>
-      <div class="row workspace-path-row">
-        <input id="importProjectPath" type="text"
-               placeholder="Choose an existing project folder"
-               autocomplete="off">
-        <button id="importBrowseProject" class="secondary" type="button">
-          <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
-          Browse
-        </button>
+  <div class="wizard-content">
+    <section class="wizard-section">
+      <div class="wizard-section-heading">
+        <div>
+          <h4>Import source</h4>
+          <p>Choose where the project comes from and confirm the folder or URL.</p>
+        </div>
+        <span class="step-number">01</span>
       </div>
-    </div>
 
-    <p id="importDialogPreview" class="muted"></p>
-    <p id="importDialogStatus" class="muted" role="status" aria-live="polite"></p>
+      <div class="app-type-grid">
+        <label class="choice-card">
+          <input type="radio" name="importSourceChoice" value="folder" checked>
+          <span class="choice-icon"><svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg></span>
+          <strong>My computer</strong>
+          <small>Import an existing project folder</small>
+        </label>
+        <label class="choice-card">
+          <input type="radio" name="importSourceChoice" value="github">
+          <span class="choice-icon"><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg></span>
+          <strong>GitHub</strong>
+          <small>Clone from a repository URL</small>
+        </label>
+      </div>
+
+      <div id="importGithubBlock" hidden>
+        <label for="importGithubUrl">Your GitHub repository URL</label>
+        <input id="importGithubUrl" type="url"
+               placeholder="Paste your GitHub URL, e.g. https://github.com/your-name/your-repo"
+               autocomplete="url">
+        <p class="muted">Paste the address of your own GitHub repository — the project is cloned into your DevPilot workspace. Git must be installed.</p>
+      </div>
+
+      <div id="importFolderBlock">
+        <label for="importProjectPath">Project folder</label>
+        <div class="row workspace-path-row">
+          <input id="importProjectPath" type="text"
+                 placeholder="Click Browse and select an existing project folder"
+                 autocomplete="off">
+          <button id="importBrowseProject" class="secondary" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+            Browse
+          </button>
+        </div>
+        <p class="muted">Your files and folder structure are imported as they are — nothing is modified.</p>
+      </div>
+
+      <p id="importDialogPreview" class="muted"></p>
+      <p id="importDialogStatus" class="muted" role="status" aria-live="polite"></p>
+    </section>
   </div>
 
   <footer class="wizard-footer">
@@ -1031,6 +1049,15 @@
 
     function isStepComplete(stepName) {
         const value = id => document.getElementById(id)?.value?.trim() || "";
+        const anyStackSelected = [
+          "frontendStack",
+          "backendStack",
+          "databaseStack",
+          "testingStack",
+          "securityStack",
+          "deploymentStack",
+          "scalingStack",
+        ].some(id => Boolean(value(id)));
 
         switch (stepName) {
           case "details":
@@ -1041,21 +1068,14 @@
               document.querySelector('input[name="appType"]:checked')
             );
 
+          // The Stack step never blocks navigation because the final stack
+          // selection happens in the Environment step, but its tab tick
+          // still reflects what the user actually entered.
           case "stack":
-              return [
-                "frontendStack",
-                "backendStack",
-                "databaseStack",
-                "testingStack",
-                "securityStack",
-                "deploymentStack",
-                "scalingStack"
-              ].some(id => Boolean(value(id)));
+            return anyStackSelected;
 
           case "environment":
-            return (
-              document.getElementById("environmentStatus")?.dataset.checked === "true"
-            );
+            return anyStackSelected;
 
           case "workspace":
             return Boolean(value("projectPath"));
@@ -1114,12 +1134,68 @@
     }
 
     dialog.showWizardStep = showStep;
+    dialog.updateWizardTabs = updateCompletedTabs;
+
+    // Each step must be completed before the user can move past it. The
+    // environment step is exempt: its checks run automatically and must not
+    // dead-end the wizard when a check fails.
+    const STEP_HINTS = {
+      "details": "Enter a project name and a short brief to continue.",
+      "app-type": "Select an application type to continue.",
+      "environment": "Add at least one technology in the Stack step to continue.",
+      "workspace": "Choose a project folder to continue.",
+    };
+
+    function blockNavigation(stepIndex) {
+      const status = document.getElementById("dialogStatus");
+      status.classList.add("error");
+      status.textContent = STEP_HINTS[stepNames[stepIndex]] || "Complete this step to continue.";
+      status.scrollIntoView({ block: "nearest" });
+    }
+
+    function clearNavigationBlock() {
+      const status = document.getElementById("dialogStatus");
+      // A name/id problem reported beside the Create button manages its own
+      // lifetime in updateIdPreview and must survive step navigation.
+      if (status.dataset.nameBlock) return;
+      status.classList.remove("error");
+      status.textContent = "";
+    }
+
+    function firstIncompleteStepBefore(index) {
+      for (let i = 0; i < index; i++) {
+        if (stepNames[i] === "stack") continue;
+        if (!isStepComplete(stepNames[i])) return i;
+      }
+      return -1;
+    }
+
     tabs.forEach((tab, index) => {
-      tab.addEventListener("click", () => showStep(index));
+      tab.addEventListener("click", () => {
+        if (index > currentStep) {
+          const blocker = firstIncompleteStepBefore(index);
+          if (blocker !== -1) {
+            blockNavigation(blocker);
+            return;
+          }
+        }
+        clearNavigationBlock();
+        showStep(index);
+      });
     });
 
     back.addEventListener("click", () => showStep(currentStep - 1));
-    next.addEventListener("click", () => showStep(currentStep + 1));
+    next.addEventListener("click", () => {
+      // The Stack step is skippable: it may be left empty because the final
+      // stack selection happens in the Environment step.
+      const skippable = stepNames[currentStep] === "stack";
+      if (!skippable && !isStepComplete(stepNames[currentStep])) {
+        blockNavigation(currentStep);
+        return;
+      }
+      clearNavigationBlock();
+      showStep(currentStep + 1);
+    });
     dialog.addEventListener("input", updateCompletedTabs);
     dialog.addEventListener("change", updateCompletedTabs);
 
@@ -1132,7 +1208,10 @@
         });
 
         dialog.querySelectorAll(".environment-item").forEach(card => {
-          card.hidden = filter !== "all" && card.dataset.status !== filter;
+          card.hidden =
+            filter !== "all" &&
+            card.dataset.status !== filter &&
+            !(filter === "unchecked" && card.dataset.status === "failed");
         });
       });
     });
@@ -1140,7 +1219,7 @@
     showStep(0);
   })();
 </script>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=16" defer></script>
 </body>
 </html>
 

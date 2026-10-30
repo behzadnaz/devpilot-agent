@@ -113,7 +113,7 @@ function basisBadge(basis) {
   const files = Array.isArray(basis.files) ? basis.files : [];
   const list = files.join(", ");
   const kinds = {
-    changed: ["code", "Changed code" + (files.length > 1 ? " Ãƒâ€šÃ‚Â· " + files.length + " files" : ""), files.length ? "Edited: " + list + ". Click to view the changes." : "Click to view the changes."],
+    changed: ["code", "Changed code" + (files.length > 1 ? " · " + files.length + " files" : ""), files.length ? "Edited: " + list + ". Click to view the changes." : "Click to view the changes."],
     analyzed: ["search", "Analyzed project", files.length ? "Based on: " + list : "Based on your project files."],
     documents: ["file", "Read attached files", files.length ? "Based on: " + list : "Based on your attached files."],
     nochange: ["check", "No changes", "Nothing in your project was edited."],
@@ -153,7 +153,7 @@ function appendChatMessage(log, speaker, text, persist, time, tags, basis) {
   entry.className = "chat-entry " + (speaker === "You" ? "you" : "them");
 
   const heading = document.createElement("strong");
-  heading.textContent = speaker + (stamp ? " Ãƒâ€šÃ‚Â· " + new Date(stamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+  heading.textContent = speaker + (stamp ? " · " + new Date(stamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
 
   const content = document.createElement("div");
   renderRich(content, text);
@@ -593,6 +593,54 @@ function stackIcon(stack) {
   return icon(ICONS[name] ? name : "code");
 }
 
+// Maps a file name to the icon name of its technology, so the project tree
+// shows e.g. the Python mark on .py files and React on .jsx files. The name
+// is drawn through the tree's existing --glyph mask, not an inline SVG.
+function fileIconName(fileName) {
+  const base = fileName.toLowerCase().split("/").pop();
+
+  if (base === "dockerfile" || base.endsWith(".dockerfile")) return "docker";
+  if (base.startsWith("vite.config.")) return "javascript";
+
+  const extension = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1) : "";
+
+  const byExtension = {
+    py: "python",
+    jsx: "react",
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    java: "java",
+    go: "go",
+    rs: "rust",
+    html: "browser",
+  };
+
+  const name = byExtension[extension];
+  return name && ICONS[name] ? name : "file";
+}
+
+function treeGlyphStyle(fileName) {
+  const body = ICONS[fileIconName(fileName)] || ICONS.file;
+  const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" + body + "</svg>";
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+// Brand-like colors for tree file icons, matching common editor themes.
+const FILE_ICON_COLORS = {
+  python: "#4B8BBE",
+  react: "#61DAFB",
+  javascript: "#F1E05A",
+  typescript: "#3178C6",
+  java: "#E76F00",
+  go: "#00ADD8",
+  rust: "#DEA584",
+  docker: "#2496ED",
+  browser: "#E44D26",
+};
+
 function initChrome() {
   const symbols = Object.entries(ICONS)
     .map(([name, body]) => '<symbol id="i-' + name + '" viewBox="0 0 24 24">' + body + '</symbol>')
@@ -613,7 +661,7 @@ function initChrome() {
             ${icon("file")}File${icon("chevron")}
           </button>
           <div class="menu-list" id="fileMenu" hidden>
-            <button id="menuNew" type="button"><img src="/static/resources/robot.png" alt="" class="brand-icon">New project</button>
+            <button id="menuNew" type="button">${icon("plus")}New project</button>
             <button id="menuImport" type="button">${icon("download")}Import project</button>
           </div>
         </div>
@@ -625,7 +673,6 @@ function initChrome() {
             ${icon("help")}Help${icon("chevron")}
           </button>
           <div class="menu-list" id="helpMenu" hidden>
-            <button id="helpBtn" type="button">${icon("help")}Help topics</button>
             <button id="aboutBtn" type="button">${icon("info")}About</button>
           </div>
         </div>
@@ -639,29 +686,16 @@ function initChrome() {
 
     <dialog id="aboutDialog">
       <h3>${icon("compass")}About DevPilot</h3>
-      <p class="muted">A local coding agent. Describe what you want, DevPilot works on a separate git branch, and you review the changes before accepting them.</p>
+      <p class="muted">A local coding agent. Create a project from your stack selection — with environment checks and one-click installs — or import an existing folder or GitHub repository. Describe what you want, DevPilot works on a separate git branch, and you review the changes before accepting them.</p>
       <ul>
-        <li>Version 1 (MVP)</li>
-        <li>Runs on your computer with Ollama (Qwen3 4B)</li>
+        <li>Version 0.1.0</li>
+        <li>Runs fully on your computer with Ollama (model: qwen3-4b-local)</li>
         <li>Project AI builds your project. Agent Core discusses and improves DevPilot itself.</li>
       </ul>
       <div class="actions end"><button class="secondary" type="button" data-close>${icon("x")}Close</button></div>
     </dialog>
 
-    <dialog id="helpDialog">
-      <h3>${icon("help")}Help</h3>
-      <ul>
-        <li><kbd>Enter</kbd> sends a message, <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a new line.</li>
-        <li><kbd>Esc</kbd> closes menus and dialogs.</li>
-        <li>Drag a panel's title to move it, drag the dividers to change widths, drag a panel's bottom edge to change its height (side by side layout), and use the buttons in its title to maximize it, or to minimize it into the folder dock on the left (click the folder to bring it back). Double-click a divider or an edge to reset.</li>
-        <li>In Explorer, create or import a project, then describe what to build in Assistant.</li>
-        <li>Pick one or both tags under the message box, Change code and Ask, to tell the AI what you want. They are sent with your message. With no tag, the AI decides.</li>
-        <li>Click the robot icon at the top right, next to the light and dark theme button, to open Agent Core: general questions, developing DevPilot, and reading your PDFs. It keeps its own history.</li>
-        <li>Canvas shows the result: a preview, the story map, the changes, and the steps.</li>
-        <li>Review the changes, then use Accept or Reject. Rejecting restores your files.</li>
-      </ul>
-      <div class="actions end"><button class="secondary" type="button" data-close>${icon("x")}Close</button></div>
-    </dialog>`);
+    `);
 
   const fileBtn = $("fileMenuBtn");
   const fileMenu = $("fileMenu");
@@ -679,9 +713,7 @@ function initChrome() {
   document.addEventListener("click", () => setHelpMenu(false));
   document.addEventListener("keydown", event => { if (event.key === "Escape") setHelpMenu(false); });
 
-  for (const [button, dialog] of [["aboutBtn", "aboutDialog"], ["helpBtn", "helpDialog"]]) {
-    $(button).addEventListener("click", () => $(dialog).showModal());
-  }
+  $("aboutBtn").addEventListener("click", () => $("aboutDialog").showModal());
 
   document.querySelectorAll("dialog").forEach(dialog => {
     dialog.addEventListener("click", event => { if (event.target === dialog && dialog.id !== "projectDialog") dialog.close(); });
@@ -938,6 +970,9 @@ function renderNode(node, list) {
   for (const file of node.files.sort((a, b) => a.name.localeCompare(b.name))) {
     const item = document.createElement("li");
     item.className = "file" + (changedFiles.has(file.path) ? " changed" : "");
+    item.style.setProperty("--glyph", treeGlyphStyle(file.name));
+    const color = FILE_ICON_COLORS[fileIconName(file.name)];
+    if (color) item.style.setProperty("--glyph-color", color);
     item.textContent = file.name;
     item.title = "Open " + file.path;
     item.addEventListener("click", () => openFile(file.path));
@@ -1071,16 +1106,36 @@ async function loadProjects() {
     for (const project of projects) {
       const item = document.createElement("li");
 
-      // Open project button with the icon of its stack selection
+      // Open project button with a colorful icon of its stack selection
       const openButton = document.createElement("button");
       openButton.type = "button";
       openButton.dataset.id = project.id;
       openButton.className =
         project.id === selectedProjectId ? "active" : "";
-      openButton.innerHTML = project.stack
-        ? stackIcon(project.stack)
-        : icon("folder");
+
+      if (project.stack) {
+        const stackName = stackIconName(project.stack);
+        const color = FILE_ICON_COLORS[stackName];
+        const svg = icon(ICONS[stackName] ? stackName : "code");
+        openButton.innerHTML = color
+          ? `<span class="stack-mark" style="color:${color}">${svg}</span>`
+          : svg;
+      } else {
+        openButton.innerHTML = icon("folder");
+      }
+
       openButton.append(document.createTextNode(project.id));
+
+      // Alarm when the project's workspace folder is gone from the disk.
+      if (project.workspace_missing) {
+        const alarm = document.createElement("span");
+        alarm.className = "missing-workspace";
+        alarm.title =
+          "Workspace folder is missing on this computer. " +
+          "The project can still be deleted from the list.";
+        alarm.innerHTML = icon("alert");
+        openButton.append(alarm);
+      }
 
       openButton.addEventListener("click", () => {
         selectProject(project.id);
@@ -1186,7 +1241,9 @@ async function loadProjects() {
           await loadProjects();
 
           listStatus.textContent =
-            "Project moved to the Recycle Bin.";
+            result.workspace_removed === false
+              ? "Project removed from the list (its workspace folder was already gone)."
+              : "Project moved to the Recycle Bin.";
         } catch (error) {
           listStatus.textContent =
             error.message || "Could not delete the project.";
@@ -1314,7 +1371,23 @@ function updateIdPreview() {
   else if (taken) idPreview.textContent = 'A project "' + id + '" already exists. Choose another name.';
   else idPreview.textContent = "Will be saved as: " + id;
 
-  dialogCreate.disabled = !!raw && (!id || taken);
+  const blocked = !!raw && (!id || taken);
+  dialogCreate.disabled = blocked;
+
+  // The idPreview hint lives on the first step and is out of view by the
+  // final step, so mirror the reason into the status line beside the
+  // Create button. Only messages we set here are cleared here.
+  if (blocked) {
+    dialogStatus.classList.add("error");
+    dialogStatus.dataset.nameBlock = "1";
+    dialogStatus.textContent = !id
+      ? "Enter a project name with letters or numbers."
+      : `A project "${id}" already exists. Choose a different name.`;
+  } else if (dialogStatus.dataset.nameBlock) {
+    delete dialogStatus.dataset.nameBlock;
+    dialogStatus.classList.remove("error");
+    dialogStatus.textContent = "";
+  }
 }
 
 dialogNameInput.addEventListener("input", updateIdPreview);
@@ -1358,17 +1431,17 @@ async function openProjectDialog(mode) {
   $("pathLabel").hidden = false;
   projectPath.parentElement.hidden = false;
   $("pathLabel").textContent = "Project folder";
-  projectPath.placeholder = "Choose a project folder";
+  projectPath.placeholder = "Click Browse and select a folder — do not type the path";
   document.querySelector('input[name="source"][value="folder"]').checked = true;
   dialogNameInput.value = "";
   $("projectSummary").value = "";
   idPreview.textContent = "";
   dialogStatus.classList.remove("error");
+  delete dialogStatus.dataset.nameBlock;
   dialogStatus.textContent = "";
   dialogCreate.disabled = false;
   projectPath.value = "";
-  const rememberedFolder = mode === "create" ? recall("devpilot.folder") : "";
-  if (rememberedFolder) projectPath.placeholder = `Last used: ${rememberedFolder}`;
+  projectPath.placeholder = "Click Browse and select a folder — do not type the path";
 
     // Reset project architecture selections for each new project.
   projectDialog.querySelectorAll('input[name="appType"]').forEach(input => {
@@ -1389,6 +1462,9 @@ async function openProjectDialog(mode) {
 
   stackCheckToken++;
   resetEnvironmentStep();
+  // Tabs must be recomputed after the fields are cleared above, otherwise
+  // a reopened dialog shows stale completed ticks from the previous session.
+  projectDialog.updateWizardTabs?.();
   projectDialog.showModal();
   dialogNameInput.focus();
 }
@@ -1409,11 +1485,13 @@ const ENVIRONMENT_SOURCES = [
   ["scalingStack", "Scaling"],
 ];
 
-// Backend statuses mapped onto the four card states.
+// Backend statuses mapped onto the card states. check_failed gets its own
+// "failed" card state so unverifiable technologies are distinguishable.
 const ENVIRONMENT_CARD_STATUS = {
   installed: "installed",
   version_mismatch: "mismatch",
   not_installed: "missing",
+  check_failed: "failed",
 };
 
 const ENVIRONMENT_PILL_LABEL = {
@@ -1421,6 +1499,7 @@ const ENVIRONMENT_PILL_LABEL = {
   mismatch: "Version mismatch",
   missing: "Not installed",
   unchecked: "Not checked",
+  failed: "Check failed",
 };
 
 const ENVIRONMENT_INSTALL_HINTS = {
@@ -1484,6 +1563,21 @@ function environmentCard(item) {
   const head = document.createElement("div");
   head.className = "environment-item-head";
 
+  // The checkbox marks the stack as selected for the project. Cards exist
+  // only for technologies the user entered, so they start selected.
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = true;
+  checkbox.className = "environment-select";
+  checkbox.setAttribute("aria-label", `Select ${item.name}`);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) return;
+    removeTechnologyFromFields(item.name);
+    card.remove();
+    refreshEnvironmentSummary();
+    projectDialog.dispatchEvent(new Event("change"));
+  });
+
   const mark = document.createElement("span");
   mark.className = "technology-mark";
   mark.textContent = environmentMonogram(item.name);
@@ -1498,11 +1592,30 @@ function environmentCard(item) {
 
   const pill = document.createElement("span");
   pill.className = "status-pill unchecked";
-  pill.textContent = "CheckingÃ¢â‚¬Â¦";
+  pill.textContent = "Checking…";
 
-  head.append(mark, info, pill);
+  head.append(checkbox, mark, info, pill);
   card.append(head);
   return card;
+}
+
+// Removes one technology token from whichever stack field contains it.
+function removeTechnologyFromFields(name) {
+  const target = name.toLowerCase();
+
+  ENVIRONMENT_SOURCES.forEach(([inputId]) => {
+    const input = $(inputId);
+    const parts = input.value
+      .split(",")
+      .map(part => part.trim())
+      .filter(part => part && part.toLowerCase() !== target);
+
+    const next = parts.join(", ");
+    if (input.value !== next) {
+      input.value = next;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
 }
 
 function environmentVersionGrid(card, requested, detected) {
@@ -1516,7 +1629,7 @@ function environmentVersionGrid(card, requested, detected) {
     const small = document.createElement("small");
     small.textContent = label;
     const strong = document.createElement("strong");
-    strong.textContent = value || "Ã¢â‚¬â€";
+    strong.textContent = value || "—";
     cell.append(small, strong);
     grid.append(cell);
   });
@@ -1524,7 +1637,7 @@ function environmentVersionGrid(card, requested, detected) {
   card.append(grid);
 }
 
-function environmentDetails(card, note, action) {
+function environmentDetails(card, note, command) {
   card.querySelector(".environment-details")?.remove();
 
   const details = document.createElement("details");
@@ -1538,23 +1651,36 @@ function environmentDetails(card, note, action) {
   noteParagraph.textContent = note;
   details.append(noteParagraph);
 
-  if (action) {
-    const box = document.createElement("div");
-    box.className = "proposed-action";
-    const text = document.createElement("p");
-    text.textContent = action;
-    box.append(text);
-    details.append(box);
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary";
-    button.setAttribute("data-env-action", "");
-    button.textContent = "Confirm installation";
-    details.append(button);
+  // The exact install/update command lives here, not on the card face.
+  if (command) {
+    const commandParagraph = document.createElement("p");
+    commandParagraph.className = "environment-command-line";
+    commandParagraph.textContent = `Command: ${command}`;
+    details.append(commandParagraph);
   }
 
   card.append(details);
+}
+
+// Visible install/update button on the card itself, driven by the backend
+// stack catalog (config/stacks.json). Nothing runs without confirmation.
+function environmentActionRow(card, action) {
+  card.querySelector(".environment-action")?.remove();
+  if (!action) return;
+
+  const row = document.createElement("div");
+  row.className = "environment-action";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary";
+  button.dataset.envAction = action.kind;
+  button.dataset.envName = action.name;
+  button.dataset.envCommand = action.command;
+  button.textContent = action.kind === "update" ? "Update now" : "Install now";
+
+  row.append(button);
+  card.append(row);
 }
 
 function environmentInstallHint(name) {
@@ -1573,11 +1699,23 @@ function applyEnvironmentResult(card, result) {
   const detected = result.detected_version || "";
   const requested = result.requested_version || "";
   const runtime = result.runtime ? ` through ${result.runtime}` : "";
+  if (requested) card.dataset.requested = requested;
 
   environmentVersionGrid(card, requested, detected);
 
+  // One-click actions come from the backend stack catalog (config/stacks.json):
+  // install when missing, update whenever a newer configured version exists.
+  const action =
+    status === "missing" && result.install_supported && result.install_command
+      ? { kind: "install", name: result.name, command: result.install_command }
+      : status !== "missing" && result.update_command
+        ? { kind: "update", name: result.name, command: result.update_command }
+        : null;
+  environmentActionRow(card, action);
+  const command = action?.command || null;
+
   if (result.note) {
-    environmentDetails(card, result.note);
+    environmentDetails(card, result.note, command);
     return;
   }
 
@@ -1585,28 +1723,32 @@ function applyEnvironmentResult(card, result) {
     environmentDetails(
       card,
       `${result.name} is available on this computer${runtime}` +
-        (detected ? ` (version ${detected}).` : "."),
+        (detected ? ` (version ${detected}).` : ".") +
+        (action ? " You can update it to the newer configured version, or keep the installed one." : ""),
+      command,
     );
   } else if (status === "mismatch") {
     environmentDetails(
       card,
       `Requested version ${requested}, but version ${detected} is installed` +
-        `${runtime}. Align the stack with the installed version or install the requested one.`,
+        `${runtime}. Press Update to move to the new version, or keep the ` +
+        `installed one by setting the requested version to ${detected} in the Stack step.`,
+      command,
     );
   } else if (status === "missing") {
     const url = environmentInstallHint(result.name);
-    const proposal = url
-      ? `Install ${result.name} from ${url}`
-      : `Install ${result.name}`;
     environmentDetails(
       card,
-      `${result.name} was not found on this computer${runtime}.`,
-      `Proposed: ${proposal}. Nothing is installed without your explicit confirmation.`,
+      url
+        ? `${result.name} was not found on this computer${runtime}. Install it manually from ${url}.`
+        : `${result.name} was not found on this computer${runtime}.`,
+      command,
     );
   } else {
     environmentDetails(
       card,
       "DevPilot cannot verify this technology automatically. Review it on this computer yourself.",
+      command,
     );
   }
 }
@@ -1616,7 +1758,13 @@ function refreshEnvironmentSummary() {
   const counts = { installed: 0, mismatch: 0, missing: 0, unchecked: 0 };
 
   cards.forEach(card => {
-    if (counts[card.dataset.status] !== undefined) counts[card.dataset.status] += 1;
+    // Check-failed technologies are reported under "Not checked": they were
+    // not successfully verified either, and the card itself says why.
+    if (card.dataset.status === "failed" || card.dataset.status === "unchecked") {
+      counts.unchecked += 1;
+    } else if (counts[card.dataset.status] !== undefined) {
+      counts[card.dataset.status] += 1;
+    }
   });
 
   $("countInstalled").textContent = counts.installed;
@@ -1627,7 +1775,10 @@ function refreshEnvironmentSummary() {
   const active =
     projectDialog.querySelector(".environment-filter.active")?.dataset.filter || "all";
   cards.forEach(card => {
-    card.hidden = active !== "all" && card.dataset.status !== active;
+    card.hidden =
+      active !== "all" &&
+      card.dataset.status !== active &&
+      !(active === "unchecked" && card.dataset.status === "failed");
   });
 }
 
@@ -1652,7 +1803,7 @@ async function runEnvironmentCheck() {
   if (!requirements.length) {
     environmentEmpty.hidden = false;
     environmentEmpty.textContent =
-      "Add technologies in the Stack step first Ã¢â‚¬â€ they will be checked here.";
+      "Add technologies in the Stack step first — they will be checked here.";
     environmentStatus.textContent = "";
     refreshEnvironmentSummary();
     return;
@@ -1662,7 +1813,7 @@ async function runEnvironmentCheck() {
   requirements.forEach(item => environmentList.append(environmentCard(item)));
   refreshEnvironmentSummary();
   environmentStatus.textContent =
-    `Checking ${requirements.length} technologies on this computerÃ¢â‚¬Â¦`;
+    `Checking ${requirements.length} technologies on this computer…`;
 
   try {
     const data = await postJson("/environment/check", {
@@ -1693,11 +1844,65 @@ async function runEnvironmentCheck() {
 projectDialog.addEventListener("wizard-environment-step", () => runEnvironmentCheck());
 $("checkEnvironment")?.addEventListener("click", () => runEnvironmentCheck());
 
-environmentList.addEventListener("click", event => {
+environmentList.addEventListener("click", async event => {
   const button = event.target.closest("[data-env-action]");
-  if (!button) return;
+  if (!button || !button.dataset.envName) return;
+
+  const name = button.dataset.envName;
+  const kind = button.dataset.envAction; // "install" | "update"
+  const command = button.dataset.envCommand || "";
+
+  const confirmed = confirm(
+    `DevPilot will run this command on your computer:\n\n${command}\n\nProceed with the ${kind}?`,
+  );
+  if (!confirmed) return;
+
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = kind === "update" ? "Updating…" : "Installing…";
   environmentStatus.textContent =
-    "Installation plans and confirmation will be connected to the backend later. Nothing was installed.";
+    `Running the ${kind} for ${name}. This can take a few minutes.`;
+
+  try {
+    const result = await postJson("/environment/install", {
+      name,
+      action: kind,
+    });
+
+    const card = button.closest(".environment-item");
+    if (card) {
+      applyEnvironmentResult(card, {
+        name,
+        status: result.status,
+        requested_version: card.dataset.requested || "",
+        detected_version: result.detected_version,
+        runtime: null,
+        note: null,
+      });
+
+      const details = card.querySelector(".environment-details");
+      if (details && result.output) {
+        const output = document.createElement("p");
+        output.className = "install-output";
+        output.textContent = "Command output:\n" + result.output.slice(0, 600);
+        details.append(output);
+      }
+    }
+
+    environmentStatus.textContent =
+      result.status === "installed"
+        ? `${name} ${kind === "update" ? "updated" : "installed"} successfully` +
+          (result.detected_version ? ` (version ${result.detected_version}).` : ".")
+        : `The ${kind} command finished, but ${name} is still not detected. See the card details for the output.`;
+
+    refreshEnvironmentSummary();
+    projectDialog.dispatchEvent(new Event("change"));
+  } catch (error) {
+    environmentStatus.textContent =
+      error.message || `The ${kind} request failed.`;
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
 });
 
 let stackCheckToken = 0;
@@ -1764,7 +1969,7 @@ async function checkStack() {
     download.target = "_blank";
     download.rel = "noopener noreferrer";
     download.textContent = "Download";
-    box.append(download, " Ãƒâ€šÃ‚Â· ");
+    box.append(download, " · ");
   }
 
   const recheck = document.createElement("a");
@@ -2056,7 +2261,7 @@ if (!section) {
   button.disabled = true;
   button.classList.add("is-loading");
   button.setAttribute("aria-busy", "true");
-  input.placeholder = "AI is suggesting a technologyÃ¢â‚¬Â¦";
+  input.placeholder = "AI is suggesting a technology…";
 
   try {
     const context = selectedProjectId
@@ -2178,6 +2383,9 @@ function chosenStack() {
 
 
 async function openImportDialog() {
+  // Match the New dialog's header: icon + label instead of a plain heading.
+  $("importDialogTitle").innerHTML = icon("download") + "Import project";
+  importDialogStatus.classList.remove("error");
   importDialogStatus.textContent = "";
   importDialogPreview.textContent = "";
   importDialogSubmit.disabled = false;
@@ -2261,22 +2469,29 @@ importDialogSubmit.addEventListener("click", async () => {
   const path = importProjectPath.value.trim();
   const url = importGithubUrl.value.trim();
 
+  const refuse = message => {
+    importDialogStatus.classList.add("error");
+    importDialogStatus.textContent = message;
+    importDialogStatus.scrollIntoView({ block: "nearest" });
+  };
+
+  importDialogStatus.classList.remove("error");
   importDialogStatus.textContent = "";
 
   if (!id) {
-    importDialogStatus.textContent = source === "github"
+    refuse(source === "github"
       ? "Enter a GitHub repository URL."
-      : "Choose a project folder.";
+      : "Choose a project folder.");
     return;
   }
 
   if (knownProjects.has(id)) {
-    importDialogStatus.textContent = `A project "${id}" already exists.`;
+    refuse(`A project "${id}" already exists. Choose a different source.`);
     return;
   }
 
   if (source === "folder" && !path) {
-    importDialogStatus.textContent = "Choose a project folder.";
+    refuse("Choose a project folder.");
     return;
   }
 
@@ -2294,8 +2509,7 @@ importDialogSubmit.addEventListener("click", async () => {
     }
 
     if (!validUrl) {
-      importDialogStatus.textContent =
-        "Enter a valid GitHub URL, like https://github.com/owner/repo.";
+      refuse("Enter a valid GitHub URL, like https://github.com/owner/repo.");
       return;
     }
   }
@@ -2316,6 +2530,7 @@ importDialogSubmit.addEventListener("click", async () => {
     await loadProjects();
     await selectProject(id);
   } catch (error) {
+    importDialogStatus.classList.add("error");
     importDialogStatus.textContent = error.message || "Import failed.";
   } finally {
     importDialogSubmit.disabled = false;
@@ -2334,18 +2549,25 @@ dialogCreate.addEventListener("click", async () => {
   const id = slugify(name);
   const path = projectPath.value.trim();
 
+  const refuse = message => {
+    delete dialogStatus.dataset.nameBlock;
+    dialogStatus.classList.add("error");
+    dialogStatus.textContent = message;
+    dialogStatus.scrollIntoView({ block: "nearest" });
+  };
+
   if (!name || !id) {
-    dialogStatus.textContent = "Enter a project name with letters or numbers.";
+    refuse("Enter a project name with letters or numbers.");
     return;
   }
 
   if (knownProjects.has(id)) {
-    dialogStatus.textContent = `A project "${id}" already exists.`;
+    refuse(`A project "${id}" already exists. Choose a different name.`);
     return;
   }
 
   if (!path) {
-    dialogStatus.textContent = "Choose a project folder.";
+    refuse("Choose a project folder.");
     return;
   }
 
@@ -2504,7 +2726,7 @@ function addStep(event) {
       toggle.className = "link";
 
       const paint = () => {
-        text.textContent = open ? full : full.slice(0, LIMIT) + "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦";
+        text.textContent = open ? full : full.slice(0, LIMIT) + "…";
         toggle.textContent = open ? "show less" : "show more";
       };
 
@@ -2525,7 +2747,7 @@ function addStep(event) {
   function tick() {
     if (running) {
       taskMeta.textContent =
-        stepCount + (stepCount === 1 ? " step" : " steps") + " Ãƒâ€šÃ‚Â· " + formatElapsed();
+        stepCount + (stepCount === 1 ? " step" : " steps") + " · " + formatElapsed();
     }
   }
 
@@ -2542,7 +2764,7 @@ function addStep(event) {
       tick();
     } else {
       taskMeta.textContent = taskStart
-        ? "Finished Ãƒâ€šÃ‚Â· " + stepCount + (stepCount === 1 ? " step" : " steps") + " Ãƒâ€šÃ‚Â· " + formatElapsed()
+        ? "Finished · " + stepCount + (stepCount === 1 ? " step" : " steps") + " · " + formatElapsed()
         : "";
     }
   }
@@ -2728,7 +2950,7 @@ function paintCoreFiles() {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", "Remove " + file.name);
-    remove.textContent = "ÃƒÆ’Ã¢â‚¬â€";
+    remove.textContent = "×";
     remove.addEventListener("click", () => {
       coreFiles = coreFiles.filter(f => f !== file);
       paintCoreFiles();

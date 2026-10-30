@@ -1,0 +1,153 @@
+{
+  "_comment": "Central stack catalog for DevPilot: display names and the commands used to install or update each technology on the local machine. Keys match the canonical names produced by environment.checker.EnvironmentChecker. Commands are only run after the user confirms them in the UI.",
+  "python": {
+    "display": "Python",
+    "install": "winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements"
+  },
+  "node": {
+    "display": "Node.js",
+    "install": "winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements"
+  },
+  "git": {
+    "display": "Git",
+    "install": "winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Git.Git --accept-source-agreements --accept-package-agreements"
+  },
+  "docker": {
+    "display": "Docker",
+    "install": "winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements"
+  },
+  "java": {
+    "display": "Java",
+    "install": "winget install -e --id EclipseAdoptium.Temurin.21.JDK --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id EclipseAdoptium.Temurin.21.JDK --accept-source-agreements --accept-package-agreements"
+  },
+  "go": {
+    "display": "Go",
+    "install": "winget install -e --id GoLang.Go --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id GoLang.Go --accept-source-agreements --accept-package-agreements"
+  },
+  "rust": {
+    "display": "Rust",
+    "install": "winget install -e --id Rustlang.Rustup --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Rustlang.Rustup --accept-source-agreements --accept-package-agreements"
+  },
+  "php": {
+    "display": "PHP",
+    "install": "winget install -e --id PHP.PHP.8.4 --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id PHP.PHP.8.4 --accept-source-agreements --accept-package-agreements"
+  },
+  "ruby": {
+    "display": "Ruby",
+    "install": "winget install -e --id RubyInstallerTeam.Ruby.3.4 --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id RubyInstallerTeam.Ruby.3.4 --accept-source-agreements --accept-package-agreements"
+  },
+  "dotnet": {
+    "display": ".NET",
+    "install": "winget install -e --id Microsoft.DotNet.SDK.8 --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Microsoft.DotNet.SDK.8 --accept-source-agreements --accept-package-agreements"
+  },
+  "postgresql": {
+    "display": "PostgreSQL",
+    "install": "winget install -e --id PostgreSQL.PostgreSQL.17 --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id PostgreSQL.PostgreSQL.17 --accept-source-agreements --accept-package-agreements"
+  },
+  "mysql": {
+    "display": "MySQL",
+    "install": "winget install -e --id Oracle.MySQL --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Oracle.MySQL --accept-source-agreements --accept-package-agreements"
+  },
+  "sqlite": {
+    "display": "SQLite",
+    "install": "winget install -e --id SQLite.SQLite --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id SQLite.SQLite --accept-source-agreements --accept-package-agreements"
+  },
+  "mongodb": {
+    "display": "MongoDB",
+    "install": "winget install -e --id MongoDB.Server --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id MongoDB.Server --accept-source-agreements --accept-package-agreements"
+  },
+  "redis": {
+    "display": "Redis",
+    "install": "winget install -e --id Redis.Redis --accept-source-agreements --accept-package-agreements",
+    "update": "winget upgrade -e --id Redis.Redis --accept-source-agreements --accept-package-agreements"
+  },
+  "react": {
+    "display": "React",
+    "install": "npm install -g react",
+    "update": "npm install -g react@latest"
+  },
+  "vue": {
+    "display": "Vue",
+    "install": "npm install -g vue",
+    "update": "npm install -g vue@latest"
+  },
+  "@angular/cli": {
+    "display": "Angular CLI",
+    "install": "npm install -g @angular/cli",
+    "update": "npm install -g @angular/cli@latest"
+  },
+  "svelte": {
+    "display": "Svelte",
+    "install": "npm install -g svelte",
+    "update": "npm install -g svelte@latest"
+  },
+  "next": {
+    "display": "Next.js",
+    "install": "npm install -g next",
+    "update": "npm install -g next@latest"
+  },
+  "express": {
+    "display": "Express",
+    "install": "npm install -g express",
+    "update": "npm install -g express@latest"
+  },
+  "vite": {
+    "display": "Vite",
+    "install": "npm install -g vite",
+    "update": "npm install -g vite@latest"
+  },
+  "tailwindcss": {
+    "display": "Tailwind CSS",
+    "install": "npm install -g tailwindcss",
+    "update": "npm install -g tailwindcss@latest"
+  },
+  "fastapi": {
+    "display": "FastAPI",
+    "install": "python -m pip install fastapi",
+    "update": "python -m pip install --upgrade fastapi"
+  },
+  "flask": {
+    "display": "Flask",
+    "install": "python -m pip install flask",
+    "update": "python -m pip install --upgrade flask"
+  },
+  "django": {
+    "display": "Django",
+    "install": "python -m pip install django",
+    "update": "python -m pip install --upgrade django"
+  },
+  "pytest": {
+    "display": "pytest",
+    "install": "python -m pip install pytest",
+    "update": "python -m pip install --upgrade pytest"
+  },
+  "uvicorn": {
+    "display": "uvicorn",
+    "install": "python -m pip install uvicorn",
+    "update": "python -m pip install --upgrade uvicorn"
+  },
+  "playwright": {
+    "display": "Playwright",
+    "install": "python -m pip install playwright",
+    "update": "python -m pip install --upgrade playwright"
+  },
+  "sqlalchemy": {
+    "display": "SQLAlchemy",
+    "install": "python -m pip install sqlalchemy",
+    "update": "python -m pip install --upgrade sqlalchemy"
+  }
+}

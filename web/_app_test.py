@@ -132,6 +132,7 @@ class _AppTest:
                     "security_stack": "",
                     "deployment_stack": "",
                     "scaling_stack": "",
+                    "workspace_missing": True,
                 },
                 {
                     "id": "my-project",
@@ -146,6 +147,7 @@ class _AppTest:
                     "security_stack": "",
                     "deployment_stack": "",
                     "scaling_stack": "",
+                    "workspace_missing": True,
                 },
             ]
         }
@@ -179,7 +181,10 @@ class _AppTest:
         assert response.json() == {
             "id": "my-new-project",
             "workflow": "development",
-            "created_files": ["index.html", "styles.css", "app.js", "README.md"],
+            "created_files": [
+                "README.md",
+                "src/instruction/project-instruction.md",
+            ],
             "skipped_files": [],
         }
         assert (
@@ -298,13 +303,13 @@ class _AppTest:
 
         assert response.status_code == 201, response.text
         assert (chosen_folder / "pyproject.toml").is_file()
-        assert (chosen_folder / "main.py").is_file()
+        assert (chosen_folder / "src" / "main.py").is_file()
         assert (chosen_folder / "README.md").is_file()
 
         pyproject = (chosen_folder / "pyproject.toml").read_text(
             encoding="utf-8"
         )
-        main_py = (chosen_folder / "main.py").read_text(
+        main_py = (chosen_folder / "src" / "main.py").read_text(
             encoding="utf-8"
         )
         readme = (chosen_folder / "README.md").read_text(
@@ -342,7 +347,7 @@ class _AppTest:
         )
 
         assert response.status_code == 201, response.text
-        assert (chosen_folder / "main.py").exists()
+        assert (chosen_folder / "src" / "main.py").exists()
         assert (chosen_folder / "pyproject.toml").exists()
         assert (chosen_folder / "README.md").exists()
 
@@ -483,14 +488,23 @@ class _AppTest:
         )
 
         assert response.status_code == 201, response.text
-        assert (chosen_folder / "server.js").is_file()
+        assert (chosen_folder / "src" / "server.js").is_file()
         assert (chosen_folder / "package.json").is_file()
 
-        server_js = (chosen_folder / "server.js").read_text(encoding="utf-8")
+        server_js = (chosen_folder / "src" / "server.js").read_text(
+            encoding="utf-8"
+        )
         assert "express" in server_js.lower()
 
-    def test_web_app_type_without_stack_scaffolds_static_site(self, tmp_path):
-        chosen_folder = tmp_path / "StaticSite"
+        package_json = (chosen_folder / "package.json").read_text(
+            encoding="utf-8"
+        )
+        assert "node src/server.js" in package_json
+
+    def test_web_app_type_without_stack_creates_no_code_files(self, tmp_path):
+        """No stack selected means no invented scaffold: docs only."""
+
+        chosen_folder = tmp_path / "DocsOnly"
         client = TestClient(
             create_app(
                 agent=None,
@@ -502,7 +516,7 @@ class _AppTest:
         response = client.post(
             "/projects",
             json={
-                "id": "static-site",
+                "id": "docs-only",
                 "path": str(chosen_folder),
                 "workflow": "software_development",
                 "summary": "A landing page.",
@@ -511,10 +525,13 @@ class _AppTest:
         )
 
         assert response.status_code == 201, response.text
-        assert (chosen_folder / "index.html").is_file()
-        assert (chosen_folder / "styles.css").is_file()
-        assert (chosen_folder / "app.js").is_file()
         assert (chosen_folder / "README.md").is_file()
+        assert (
+            chosen_folder / "src" / "instruction" / "project-instruction.md"
+        ).is_file()
+        assert not (chosen_folder / "index.html").exists()
+        assert not (chosen_folder / "styles.css").exists()
+        assert not (chosen_folder / "app.js").exists()
 
     def test_create_into_folder_with_existing_files_skips_them(self, tmp_path):
         chosen_folder = tmp_path / "ExistingFolder"
@@ -548,11 +565,63 @@ class _AppTest:
         assert "user-file" in (chosen_folder / "pyproject.toml").read_text(
             encoding="utf-8"
         )
-        assert (chosen_folder / "main.py").is_file()
+        assert (chosen_folder / "src" / "main.py").is_file()
         assert (chosen_folder / "README.md").is_file()
 
         assert response.json()["skipped_files"] == ["pyproject.toml"]
-        assert set(response.json()["created_files"]) == {"main.py", "README.md"}
+        assert set(response.json()["created_files"]) == {
+            "src/main.py",
+            "README.md",
+            "src/instruction/project-instruction.md",
+        }
+
+    def test_instruction_folder_records_dialog_information(self, tmp_path):
+        chosen_folder = tmp_path / "InstructedApp"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/projects",
+            json={
+                "id": "instructed-app",
+                "path": str(chosen_folder),
+                "workflow": "software_development",
+                "summary": "A clinic booking site for patients.",
+                "app_type": "web",
+                "frontend_stack": "React",
+                "backend_stack": "Python + FastAPI",
+                "database_stack": "PostgreSQL",
+                "testing_stack": "pytest",
+                "security_stack": "OAuth",
+                "deployment_stack": "Docker",
+                "scaling_stack": "Caching",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+
+        instruction = (
+            chosen_folder / "src" / "instruction" / "project-instruction.md"
+        ).read_text(encoding="utf-8")
+
+        assert "instructed-app" in instruction
+        assert "A clinic booking site for patients." in instruction
+        assert "App type: web" in instruction
+        for label in (
+            "Frontend: React",
+            "Backend: Python + FastAPI",
+            "Database: PostgreSQL",
+            "Testing: pytest",
+            "Security: OAuth",
+            "Deployment: Docker",
+            "Scaling: Caching",
+        ):
+            assert label in instruction
 
     def test_duplicate_project_creation_returns_conflict(self, tmp_path):
         registry = _ProjectRegistryStub(
@@ -1079,7 +1148,7 @@ class _AppTest:
         response = client.delete("/projects/my-project")
 
         assert response.status_code == 200
-        assert response.json() == {"deleted": "my-project"}
+        assert response.json() == {"deleted": "my-project", "workspace_removed": True}
         assert not project_path.exists()
         assert (recycle_bin / "my-project").is_dir()
         assert other_path.is_dir()
@@ -1172,7 +1241,7 @@ class _AppTest:
         response = client.delete("/projects/private-project")
 
         assert response.status_code == 200
-        assert response.json() == {"deleted": "private-project"}
+        assert response.json() == {"deleted": "private-project", "workspace_removed": True}
         assert not outside_path.exists()
         assert (recycle_bin / "private-project").is_dir()
         assert "private-project" not in registry.projects
@@ -2442,7 +2511,204 @@ class _AppTest:
         assert project["security_stack"] == "Environment variables + OAuth"
         assert project["deployment_stack"] == "Docker + CI/CD"
         assert project["scaling_stack"] == "Caching + background workers"
+        assert project["workspace_missing"] is True
 
+    def test_deletes_project_whose_workspace_folder_is_gone(self, tmp_path):
+        gone_folder = tmp_path / "vanished"
+        registry = _ProjectRegistryStub(
+            projects={
+                "vanished-project": {
+                    "workflow": "software_development",
+                    "path": gone_folder,
+                }
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
+
+        response = client.delete("/projects/vanished-project")
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "deleted": "vanished-project",
+            "workspace_removed": False,
+        }
+        assert "vanished-project" not in registry.projects
+
+    def test_delete_still_recycles_existing_workspace(self, tmp_path):
+        alive_folder = tmp_path / "alive"
+        alive_folder.mkdir()
+        registry = _ProjectRegistryStub(
+            projects={
+                "alive-project": {
+                    "workflow": "software_development",
+                    "path": alive_folder,
+                }
+            }
+        )
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
+
+        response = client.delete("/projects/alive-project")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["workspace_removed"] is True
+        assert "alive-project" not in registry.projects
+
+
+    def test_import_existing_folder_registers_project(self, tmp_path):
+        source_folder = tmp_path / "ExistingProject"
+        source_folder.mkdir()
+        (source_folder / "app.py").write_text("print('hi')", encoding="utf-8")
+
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(agent=None, project_registry=registry)
+        )
+
+        response = client.post(
+            "/projects/import",
+            json={
+                "id": "existing-project",
+                "path": str(source_folder),
+                "source": "folder",
+                "workflow": "software_development",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["source"] == "folder"
+
+        # The user's files are untouched and the project is registered.
+        assert (source_folder / "app.py").read_text(encoding="utf-8") == "print('hi')"
+        assert "existing-project" in registry.projects
+
+    def test_import_rejects_missing_folder(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+            )
+        )
+
+        response = client.post(
+            "/projects/import",
+            json={
+                "id": "nope",
+                "path": str(tmp_path / "does-not-exist"),
+                "source": "folder",
+            },
+        )
+
+        assert response.status_code == 400, response.text
+
+    def test_import_rejects_invalid_github_url(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+            )
+        )
+
+        response = client.post(
+            "/projects/import",
+            json={
+                "id": "nope",
+                "url": "https://gitlab.com/owner/repo",
+                "source": "github",
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert "valid GitHub URL" in response.json()["detail"]
+
+    def test_import_github_clones_into_workspace(self, tmp_path, monkeypatch):
+        import subprocess as subprocess_module
+
+        clone_commands = []
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            clone_commands.append(command)
+            # Simulate git clone: create the target folder with a file.
+            target = Path(command[-1])
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "README.md").write_text("# demo", encoding="utf-8")
+            return FakeCompleted()
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+        workspace = tmp_path / "DevPilot-Workspace"
+        registry = _ProjectRegistryStub()
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=registry,
+                projects_root=workspace,
+            )
+        )
+
+        response = client.post(
+            "/projects/import",
+            json={
+                "id": "hello-world",
+                "url": "https://github.com/octocat/Hello-World.git",
+                "source": "github",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["source"] == "github"
+
+        assert len(clone_commands) == 1
+        assert "clone" in clone_commands[0]
+        # The clone lands in the configured workspace.
+        assert str(workspace) in clone_commands[0][-1]
+        assert (workspace / "Hello-World" / "README.md").is_file()
+        assert "hello-world" in registry.projects
+
+    def test_import_github_clone_failure_cleans_up(self, tmp_path, monkeypatch):
+        import subprocess as subprocess_module
+
+        class FakeCompleted:
+            returncode = 128
+            stdout = ""
+            stderr = "fatal: repository not found"
+
+        def fake_run(command, **kwargs):
+            Path(command[-1]).mkdir(parents=True, exist_ok=True)
+            return FakeCompleted()
+
+        monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+        workspace = tmp_path / "DevPilot-Workspace"
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=workspace,
+            )
+        )
+
+        response = client.post(
+            "/projects/import",
+            json={
+                "id": "missing-repo",
+                "url": "https://github.com/octocat/does-not-exist",
+                "source": "github",
+            },
+        )
+
+        assert response.status_code == 502, response.text
+        assert "repository not found" in response.json()["detail"]
+        # The partial clone folder is removed again.
+        assert not (workspace / "does-not-exist").exists()
 
     def test_environment_check_reports_each_selected_technology(self, tmp_path):
         client = TestClient(
@@ -2551,5 +2817,126 @@ class _AppTest:
 
         assert response.status_code == 200, response.text
         assert calls == [requirements]
-        assert response.json() == {"results": expected_results}
+
+        results = response.json()["results"]
+        assert results == [
+            {
+                "component": "database",
+                "name": "PostgreSQL",
+                "requested_version": "17",
+                "detected_version": None,
+                "status": "not_installed",
+                "install_supported": True,
+                "install_command": results[0]["install_command"],
+                "update_command": results[0]["update_command"],
+            }
+        ]
+        # The proposed commands come from the stack catalog, not the client.
+        assert results[0]["install_command"].startswith("winget install")
+
+    def test_stacks_catalog_lists_entries_for_selection_grid(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get("/stacks")
+
+        assert response.status_code == 200, response.text
+        stacks = response.json()["stacks"]
+        assert len(stacks) >= 20
+
+        python = next(item for item in stacks if item["key"] == "python")
+        assert python["display"] == "Python"
+
+        # Entries are sorted by display name for the selection grid.
+        displays = [item["display"] for item in stacks]
+        assert displays == sorted(displays, key=str.lower)
+
+    def test_environment_install_rejects_unknown_technology(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/environment/install",
+            json={"name": "DefinitelyNotAThing", "action": "install"},
+        )
+
+        assert response.status_code == 404, response.text
+        assert "config/stacks.json" in response.json()["detail"]
+
+    def test_environment_install_rejects_invalid_action(self, tmp_path):
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/environment/install",
+            json={"name": "Python", "action": "remove"},
+        )
+
+        assert response.status_code == 422, response.text
+
+    def test_environment_install_runs_cataloged_command_and_rechecks(
+        self, tmp_path, monkeypatch
+    ):
+        import subprocess as subprocess_module
+
+        ran = []
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "installed successfully"
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            ran.append(command)
+            return FakeCompleted()
+
+        monkeypatch.setattr(
+            subprocess_module,
+            "run",
+            fake_run,
+        )
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post(
+            "/environment/install",
+            json={"name": "Python", "action": "install"},
+        )
+
+        assert response.status_code == 200, response.text
+        # Two commands ran: the cataloged install, then the verification
+        # recheck that detects the installed version for real.
+        assert len(ran) == 2
+        # The installed command is the cataloged one, not caller-provided.
+        assert ran[0].startswith("winget install")
+        assert any("version" in str(part) for part in ran[1])
+
+        result = response.json()
+        assert result["command"].startswith("winget install")
+        assert result["exit_code"] == 0
+        # The fake command output contains no version number, so the honest
+        # recheck reports the technology as still not installed.
+        assert result["status"] == "not_installed"
+        assert result["detected_version"] is None
 

@@ -2,8 +2,11 @@
 import inspect
 import json
 import os
+import re
 import shutil
+import subprocess
 import threading
+from urllib.parse import urlsplit
 import logging
 import time
 import uuid
@@ -42,6 +45,29 @@ PAGE = STATIC_ROOT / "index.html"
 MODEL_CONFIG = PROJECT_ROOT / "config" / "model.yaml"
 TOOLS_CONFIG = PROJECT_ROOT / "config" / "tools.json"
 LIMITS_CONFIG = PROJECT_ROOT / "config" / "limits.yaml"
+STACKS_CONFIG = PROJECT_ROOT / "config" / "stacks.json"
+
+
+def load_stack_catalog() -> dict:
+    """Load the stack catalog. Reread per call so edits apply without a restart."""
+
+    try:
+        with STACKS_CONFIG.open("r", encoding="utf-8") as file:
+            catalog = json.load(file)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Could not load stack catalog %s: %s", STACKS_CONFIG, exc)
+        return {}
+
+    if not isinstance(catalog, dict):
+        logger.warning("Stack catalog %s is not a JSON object.", STACKS_CONFIG)
+        return {}
+
+    return {
+        key: entry
+        for key, entry in catalog.items()
+        if isinstance(key, str) and not key.startswith("_")
+        and isinstance(entry, dict)
+    }
 
 PROJECTS_ROOT = Path(
     os.environ.get(
@@ -137,6 +163,14 @@ class ProjectRequest(BaseModel):
     deployment_stack: str = ""
     scaling_stack: str = ""
     tags: list[str] = Field(default_factory=list)
+
+
+class ImportRequest(BaseModel):
+    id: str = ""
+    path: str = ""
+    url: str = ""
+    source: str = "folder"
+    workflow: str = "software_development"
 
 
 class WorkspaceRequest(BaseModel):
@@ -897,53 +931,20 @@ def _node_express_files() -> dict[str, str]:
     }
 
 
-def _static_web_files(summary: str) -> dict[str, str]:
-    return {
-        "index.html": (
-            "<!doctype html>\n"
-            '<html lang="en">\n'
-            "  <head>\n"
-            '    <meta charset="utf-8" />\n'
-            '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
-            "    <title>DevPilot Project</title>\n"
-            '    <link rel="stylesheet" href="styles.css" />\n'
-            "  </head>\n"
-            "  <body>\n"
-            "    <main>\n"
-            "      <h1>DevPilot Project</h1>\n"
-            "      <p>" + (summary or "A project created with DevPilot.") + "</p>\n"
-            "    </main>\n"
-            '    <script src="app.js"></script>\n'
-            "  </body>\n"
-            "</html>\n"
-        ),
-        "styles.css": (
-            "body {\n"
-            '  font-family: system-ui, sans-serif;\n'
-            "  margin: 0;\n"
-            "}\n\n"
-            "main {\n"
-            "  padding: 2rem;\n"
-            "  max-width: 720px;\n"
-            "  margin: 0 auto;\n"
-            "}\n"
-        ),
-        "app.js": (
-            'console.log("DevPilot project ready");\n'
-        ),
-    }
-
-
 def _starter_readme(
+    project_name: str,
     summary: str,
     stack_lines: list[str],
     structure_lines: list[str],
     run_sections: list[tuple[str, list[str]]],
 ) -> str:
     parts = [
-        "# DevPilot Project",
+        f"# {project_name}" if project_name else "# DevPilot Project",
         "",
         summary or "A project created with DevPilot.",
+        "",
+        "This file records the decisions made when the project was created. "
+        "Keep it up to date as the project evolves.",
         "",
     ]
 
@@ -1018,6 +1019,44 @@ def _write_starter_files(
     return {"created": created, "skipped": skipped}
 
 
+def _slugify_id(name: str) -> str:
+    """Project id from a folder or repository name, like the frontend."""
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower())
+    return slug.strip("-")
+
+
+def _validate_github_url(url: str) -> str | None:
+    """Repository name from a GitHub URL, or None when invalid."""
+
+    try:
+        link = urlsplit(url)
+    except ValueError:
+        return None
+
+    if link.scheme != "https" or link.hostname != "github.com":
+        return None
+
+    parts = [part for part in link.path.split("/") if part]
+    if len(parts) < 2:
+        return None
+
+    return re.sub(r"\.git$", "", parts[1], flags=re.IGNORECASE)
+
+
+def _workspace_missing(config: dict) -> bool:
+    """True when the project's registered folder is not on disk anymore."""
+
+    raw_path = str(config.get("path", "")).strip()
+    if not raw_path:
+        return True
+
+    try:
+        return not Path(raw_path).expanduser().exists()
+    except OSError:
+        return True
+
+
 def create_starter_files_for_project(
     project_path: Path,
     request: "ProjectRequest",
@@ -1045,7 +1084,8 @@ def create_starter_files_for_project(
         frontend_kind = "vue"
 
     # When the project has both a backend and a frontend selection, each
-    # scaffold lives in its own folder; a single selection stays at the root.
+    # scaffold lives in its own package folder; a single selection follows the
+    # IntelliJ-style layout with the code under src/.
     split_layout = bool(backend_kind and frontend_kind)
     backend_dir = "backend" if split_layout else ""
     frontend_dir = "frontend" if split_layout else ""
@@ -1060,26 +1100,41 @@ def create_starter_files_for_project(
             scaffold[name] = content
 
     if backend_kind == "python-fastapi":
-        place(backend_dir, _python_fastapi_files())
+        files = _python_fastapi_files()
+        code_note = "main.py"
+        if not split_layout:
+            # IntelliJ-style layout: code under src/, packaging at the root.
+            files["src/main.py"] = files.pop("main.py")
+            code_note = "src/main.py"
+        place(backend_dir, files)
         structure_lines.append(
             f"{backend_dir + '/' if backend_dir else ''}"
-            "Python + FastAPI service"
-            " (main.py, pyproject.toml)"
+            f"Python + FastAPI service ({code_note}, pyproject.toml)"
         )
         steps = []
         if backend_dir:
             steps.append(f"cd {backend_dir}")
         steps.extend([
             'pip install fastapi "uvicorn[standard]"',
-            "python -m uvicorn main:app --reload",
+            "python -m uvicorn main:app --app-dir src --reload"
+            if not split_layout
+            else "python -m uvicorn main:app --reload",
         ])
         run_sections.append(("Python + FastAPI", steps))
     elif backend_kind == "node-express":
-        place(backend_dir, _node_express_files())
+        files = _node_express_files()
+        code_note = "server.js"
+        if not split_layout:
+            files["src/server.js"] = files.pop("server.js")
+            files["package.json"] = files["package.json"].replace(
+                '"start": "node server.js"',
+                '"start": "node src/server.js"',
+            )
+            code_note = "src/server.js"
+        place(backend_dir, files)
         structure_lines.append(
             f"{backend_dir + '/' if backend_dir else ''}"
-            "Node.js + Express service"
-            " (server.js, package.json)"
+            f"Node.js + Express service ({code_note}, package.json)"
         )
         steps = []
         if backend_dir:
@@ -1112,29 +1167,80 @@ def create_starter_files_for_project(
         steps.extend(["npm install", "npm run dev"])
         run_sections.append(("Vue (Vite)", steps))
 
-    if not scaffold and app_type == "web":
-        place("", _static_web_files(request.summary.strip()))
-        run_sections.append(("Static web app", ["Open index.html in a browser"]))
+    # No fallback scaffold: a stack that was not selected must not produce
+    # files. Projects without a recognized stack get README + instruction only.
 
-    stack_lines = [f"App type: {app_type}"]
+    stack_lines = [
+        f"Project name: {request.id.strip()}",
+        f"App type: {app_type}",
+    ]
     for label, value in (
         ("Stack", stack),
         ("Frontend", frontend_stack),
         ("Backend", backend_stack),
         ("Database", request.database_stack.strip()),
         ("Testing", request.testing_stack.strip()),
+        ("Security", request.security_stack.strip()),
         ("Deployment", request.deployment_stack.strip()),
+        ("Scaling", request.scaling_stack.strip()),
     ):
         if value:
             stack_lines.append(f"{label}: {value}")
 
     # A README is always created, even when no scaffold matched the stack.
     scaffold["README.md"] = _starter_readme(
+        request.id.strip(),
         request.summary.strip(),
         stack_lines,
         structure_lines if split_layout else [],
         run_sections,
     )
+
+    # The instruction folder preserves everything entered in the New Project
+    # dialog so the brief travels with the project, inside src/ of the tree.
+    instruction_lines = [
+        "# Project instruction",
+        "",
+        f"- Project name: {request.id.strip()}",
+        f"- Created: {time.strftime('%Y-%m-%d %H:%M')}",
+        f"- App type: {app_type}",
+        f"- Brief: {request.summary.strip() or 'Not provided.'}",
+        "",
+        "## Stack selections",
+        "",
+    ]
+
+    selection_labels = (
+        ("Frontend", request.frontend_stack),
+        ("Backend", request.backend_stack),
+        ("Database", request.database_stack),
+        ("Testing", request.testing_stack),
+        ("Security", request.security_stack),
+        ("Deployment", request.deployment_stack),
+        ("Scaling", request.scaling_stack),
+    )
+
+    wrote_selection = False
+
+    for label, value in selection_labels:
+        if value.strip():
+            instruction_lines.append(f"- {label}: {value.strip()}")
+            wrote_selection = True
+
+    if not wrote_selection:
+        instruction_lines.append("- No stack fields were filled in.")
+
+    instruction_lines.extend([
+        "",
+        "## Guidance for AI work",
+        "",
+        "- Follow the brief and stack selections above.",
+        "- Keep changes consistent with the chosen app type and technologies.",
+        "- Update this instruction file when the project's goals change.",
+        "",
+    ])
+
+    scaffold["src/instruction/project-instruction.md"] = "\n".join(instruction_lines)
 
     return _write_starter_files(project_path, scaffold)
 
@@ -1331,6 +1437,27 @@ def create_app(
     local_environment_client = LocalEnvironmentClient()
     environment_checker = EnvironmentChecker()
 
+    def _annotate_with_catalog(results: list) -> list:
+        """Add install/update command info from the stack catalog to results."""
+
+        catalog = load_stack_catalog()
+
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+
+            entry = catalog.get(
+                environment_checker.canonical_name(item.get("name", "")) or ""
+            )
+
+            item["install_supported"] = bool(
+                entry and (entry.get("install") or entry.get("update"))
+            )
+            item["install_command"] = (entry or {}).get("install") or None
+            item["update_command"] = (entry or {}).get("update") or None
+
+        return results
+
     @web_app.post("/environment/check")
     def check_environment(request: dict):
         mode = str(request.get("mode", "local")).strip().lower()
@@ -1362,8 +1489,10 @@ def create_app(
                     detail="Each requirement must include a technology name.",
                 )
 
+        environment_checker.reset_caches()
+
         try:
-            return local_environment_client.check_environment(requirements)
+            result = local_environment_client.check_environment(requirements)
         except Exception as agent_error:
             # The paired local agent is optional: when the web app itself
             # runs on the user's machine, check directly in-process.
@@ -1372,15 +1501,118 @@ def create_app(
                 "falling back to in-process checks.",
                 agent_error,
             )
+            try:
+                result = {"results": environment_checker.check(requirements)}
+            except Exception as exc:
+                logger.warning("In-process environment check failed: %s", exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail="Could not reach the local environment agent.",
+                ) from exc
+
+        result["results"] = _annotate_with_catalog(result.get("results", []))
+        return result
+
+    @web_app.get("/stacks")
+    def list_known_stacks():
+        """Catalog entries for the wizard's stack selection grid."""
+
+        entries = [
+            {"key": key, "display": entry.get("display", key)}
+            for key, entry in sorted(
+                load_stack_catalog().items(),
+                key=lambda item: item[1].get("display", item[0]).lower(),
+            )
+        ]
+
+        return {"stacks": entries}
+
+    @web_app.post("/environment/install")
+    def install_environment(request: dict):
+        """Run the cataloged install/update command for one technology.
+
+        The command comes from config/stacks.json, never from the request,
+        and is shown to the user for confirmation before this is called.
+        """
+
+        name = str(request.get("name", "")).strip()
+        action = str(request.get("action", "install")).strip().lower()
+
+        if not name:
+            raise HTTPException(
+                status_code=422,
+                detail="'name' is required.",
+            )
+
+        if action not in ("install", "update"):
+            raise HTTPException(
+                status_code=422,
+                detail="'action' must be 'install' or 'update'.",
+            )
+
+        entry = load_stack_catalog().get(
+            environment_checker.canonical_name(name) or ""
+        )
+
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No install command is configured for '{name}'. "
+                    "Add it to config/stacks.json."
+                ),
+            )
+
+        command = entry.get(action)
+
+        if not command:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No {action} command is configured for "
+                    f"{entry.get('display', name)}."
+                ),
+            )
 
         try:
-            return {"results": environment_checker.check(requirements)}
-        except Exception as exc:
-            logger.warning("In-process environment check failed: %s", exc)
+            completed = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
             raise HTTPException(
-                status_code=502,
-                detail="Could not reach the local environment agent.",
+                status_code=504,
+                detail=f"The {action} for {name} timed out.",
+            )
+        except OSError as exc:
+            logger.warning("Could not run %s %s: %s", action, name, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not run the {action} command for {name}.",
             ) from exc
+
+        output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+        if len(output) > 4000:
+            output = output[:4000] + "\n... (output truncated)"
+
+        # Verify the outcome instead of trusting the exit code alone.
+        environment_checker.reset_caches()
+        recheck = environment_checker.check_one(
+            component="",
+            name=name,
+        )
+
+        return {
+            "status": recheck["status"],
+            "command": command,
+            "exit_code": completed.returncode,
+            "output": output,
+            "detected_version": recheck.get("detected_version"),
+        }
 
     # -----------------------------------------------------
     # Technology stack recommendations
@@ -1534,6 +1766,7 @@ def create_app(
                     "security_stack": config.get("security_stack", ""),
                     "deployment_stack": config.get("deployment_stack", ""),
                     "scaling_stack": config.get("scaling_stack", ""),
+                    "workspace_missing": _workspace_missing(config),
                 }
                 for project_id, config in sorted(projects.items())
             ]
@@ -1664,6 +1897,161 @@ def create_app(
             "skipped_files": scaffold_result["skipped"],
         }
 
+    @web_app.post("/projects/import", status_code=201)
+    def import_project(request: ImportRequest):
+        """Register an existing folder or clone a GitHub repository."""
+
+        if project_registry is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Project registry is not configured.",
+            )
+
+        source = request.source.strip().lower()
+        if source not in ("folder", "github"):
+            raise HTTPException(
+                status_code=422,
+                detail="'source' must be 'folder' or 'github'.",
+            )
+
+        workflow = request.workflow.strip() or "software_development"
+
+        if source == "folder":
+            raw_path = request.path.strip()
+            if not raw_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Choose a project folder to import.",
+                )
+
+            folder = Path(raw_path).expanduser().resolve()
+            if not folder.exists() or not folder.is_dir():
+                raise HTTPException(
+                    status_code=400,
+                    detail="The chosen folder does not exist on this computer.",
+                )
+
+            project_id = request.id.strip() or _slugify_id(folder.name)
+            target = folder
+        else:
+            url = request.url.strip()
+            repo_name = _validate_github_url(url)
+
+            if not repo_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Enter a valid GitHub URL, like "
+                        "https://github.com/owner/repo."
+                    ),
+                )
+
+            project_id = request.id.strip() or _slugify_id(repo_name)
+
+            clone_root = Path(
+                projects_root
+                if projects_root is not None
+                else PROJECTS_ROOT
+            ).expanduser().resolve()
+            target = clone_root / repo_name
+
+            if target.exists():
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"The folder '{target.name}' already exists in the "
+                        "workspace. Import it from 'My computer' instead."
+                    ),
+                )
+
+            git = shutil.which("git")
+            if not git:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Git is not installed on this computer. "
+                        "Install Git to import from GitHub."
+                    ),
+                )
+
+            clone_root.mkdir(parents=True, exist_ok=True)
+
+            try:
+                completed = subprocess.run(
+                    [git, "clone", "--depth", "1", url, str(target)],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                shutil.rmtree(target, ignore_errors=True)
+                raise HTTPException(
+                    status_code=504,
+                    detail="Cloning the repository timed out.",
+                )
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not start Git on this computer.",
+                ) from exc
+
+            if completed.returncode != 0:
+                shutil.rmtree(target, ignore_errors=True)
+                detail = (completed.stderr or "").strip().splitlines()
+                tail = detail[-1] if detail else "Git clone failed."
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not clone the repository: {tail}",
+                )
+
+        if project_id in project_registry.list_projects():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Project already exists: {project_id}",
+            )
+
+        try:
+            project_registry.add_project(
+                project_id,
+                {
+                    "path": target,
+                    "workflow": workflow,
+                    "summary": "",
+                    "stack": "",
+                    "app_type": "web",
+                    "frontend_stack": "",
+                    "backend_stack": "",
+                    "database_stack": "",
+                    "testing_stack": "",
+                    "security_stack": "",
+                    "deployment_stack": "",
+                    "scaling_stack": "",
+                },
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
+            # A freshly cloned repository is removed again; a user's own
+            # folder is never touched.
+            if source == "github":
+                shutil.rmtree(target, ignore_errors=True)
+
+            logger.exception("Could not register imported project %s", project_id)
+            raise HTTPException(
+                status_code=500,
+                detail="Could not register the imported project.",
+            ) from exc
+
+        return {
+            "id": project_id,
+            "path": str(target),
+            "source": source,
+        }
+
     @web_app.delete("/projects/{project_id}")
     def delete_project(project_id: str):
         """Move a registered project to the Recycle Bin."""
@@ -1700,19 +2088,16 @@ def create_app(
                 ),
             )
 
-        if not project_path.exists() or not project_path.is_dir():
-            raise HTTPException(
-                status_code=400,
-                detail="Project folder does not exist.",
-            )
+        folder_present = project_path.exists() and project_path.is_dir()
 
-        try:
-            send2trash(str(project_path))
-        except OSError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not move the project to the Recycle Bin.",
-            ) from exc
+        if folder_present:
+            try:
+                send2trash(str(project_path))
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not move the project to the Recycle Bin.",
+                ) from exc
 
         try:
             project_registry.remove_project(project_id)
@@ -1722,7 +2107,7 @@ def create_app(
                 detail="Project not found in the registry.",
             ) from None
 
-        return {"deleted": project_id}
+        return {"deleted": project_id, "workspace_removed": folder_present}
 
     # -----------------------------------------------------
     # Project file tree
