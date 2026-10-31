@@ -1,0 +1,24 @@
+# DevPilot feature flags
+# ----------------------
+# Turn a UI feature on or off:  id=1 (on)  |  id=0 (off)
+# - Lines starting with # are comments; blank lines are ignored.
+# - An id that is NOT listed here defaults to ON, so new features
+#   appear automatically -- add a line only when you want to manage it.
+# - Changes apply on the next page refresh (no server restart needed).
+#
+# Top bar
+menu.file=1
+menu.help=1
+agent_core=1
+checkpoint=1
+theme_toggle=1
+# Main panels
+panel.explorer=1
+panel.assistant=1
+panel.canvas=1
+# Canvas tabs
+canvas.tab.preview=1
+canvas.tab.story_map=1
+canvas.tab.class_diagram=1
+canvas.tab.changes=1
+canvas.tab.steps=1

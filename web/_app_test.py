@@ -2834,6 +2834,184 @@ class _AppTest:
         # The proposed commands come from the stack catalog, not the client.
         assert results[0]["install_command"].startswith("winget install")
 
+    def _init_checkpoint_repo(self, tmp_path):
+        import subprocess as subprocess_module
+        import web.app as app_module
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        for args in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "test@local"],
+            ["git", "config", "user.name", "Test"],
+        ):
+            subprocess_module.run(args, cwd=str(repo), check=True, capture_output=True)
+        (repo / "seed.txt").write_text("seed", encoding="utf-8")
+        subprocess_module.run(
+            ["git", "add", "-A"], cwd=str(repo), check=True, capture_output=True
+        )
+        subprocess_module.run(
+            ["git", "commit", "-q", "-m", "seed"],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
+        monkeypatch_target = app_module.PROJECT_ROOT
+        return repo, app_module, monkeypatch_target
+
+    def test_checkpoint_status_counts_uncommitted_changes(self, tmp_path, monkeypatch):
+        repo, app_module, _ = self._init_checkpoint_repo(tmp_path)
+        monkeypatch.setattr(app_module, "PROJECT_ROOT", repo)
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        assert client.get("/checkpoint").json() == {"changes": 0}
+
+        (repo / "new.txt").write_text("dirty", encoding="utf-8")
+
+        assert client.get("/checkpoint").json() == {"changes": 1}
+
+    def test_checkpoint_post_commits_and_moves_ui_stable_tag(self, tmp_path, monkeypatch):
+        import subprocess as subprocess_module
+
+        repo, app_module, _ = self._init_checkpoint_repo(tmp_path)
+        monkeypatch.setattr(app_module, "PROJECT_ROOT", repo)
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        (repo / "feature.txt").write_text("work", encoding="utf-8")
+
+        response = client.post(
+            "/checkpoint",
+            json={"message": "checkpoint: before change"},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["committed"] is True
+
+        # The change is committed and the ui-stable tag points at it.
+        status = subprocess_module.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert status.strip() == ""
+
+        tag_commit = subprocess_module.run(
+            ["git", "rev-list", "-1", "ui-stable"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        head_commit = subprocess_module.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert tag_commit == head_commit
+
+        log = subprocess_module.run(
+            ["git", "log", "-1", "--pretty=%s"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert log == "checkpoint: before change"
+
+    def test_checkpoint_post_with_clean_tree_reports_nothing_to_commit(self, tmp_path, monkeypatch):
+        repo, app_module, _ = self._init_checkpoint_repo(tmp_path)
+        monkeypatch.setattr(app_module, "PROJECT_ROOT", repo)
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.post("/checkpoint", json={})
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"committed": False, "changes": 0}
+
+    def test_features_endpoint_parses_config_file(self, tmp_path, monkeypatch):
+        import web.app as app_module
+
+        flags_file = tmp_path / "features.txt"
+        flags_file.write_text(
+            "# comment\n"
+            "\n"
+            "menu.file=1\n"
+            "menu.help=0\n"
+            "theme.toggle=off\n"
+            "future.feature=false\n"
+            "garbage line without equals\n"
+            "bad.value=maybe\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(app_module, "FEATURES_CONFIG", flags_file)
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get("/features")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["features"] == {
+            "menu.file": True,
+            "menu.help": False,
+            "theme.toggle": False,
+            "future.feature": False,
+        }
+
+    def test_features_endpoint_without_config_file_allows_everything(self, tmp_path, monkeypatch):
+        import web.app as app_module
+
+        monkeypatch.setattr(
+            app_module,
+            "FEATURES_CONFIG",
+            tmp_path / "does-not-exist.txt",
+        )
+
+        client = TestClient(
+            create_app(
+                agent=None,
+                project_registry=_ProjectRegistryStub(),
+                projects_root=tmp_path,
+            )
+        )
+
+        response = client.get("/features")
+
+        assert response.status_code == 200, response.text
+        # No file = nothing switched off; the frontend treats absence as on.
+        assert response.json()["features"] == {}
+
     def test_stacks_catalog_lists_entries_for_selection_grid(self, tmp_path):
         client = TestClient(
             create_app(

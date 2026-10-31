@@ -9,5 +9,8 @@ dependencies = [
     "PyYAML",
 ]
 
-[tool.vercel]
-entrypoint = "web.app:application"
+[tool.pytest.ini_options]
+testpaths = ["app", "web", "environment"]
+python_files = ["_*_test.py"]
+python_classes = ["_*Test"]
+python_functions = ["test_*"]

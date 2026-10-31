@@ -11,7 +11,7 @@
   <link rel="icon" type="image/png" href="/resources/robot.png">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
 
-  <link rel="stylesheet" href="/static/app.css?v=2030">
+  <link rel="stylesheet" href="/static/app.css?v=2032">
 
   <script>
     try {
@@ -218,7 +218,7 @@
       <div class="workspace horizontal" id="workspace">
 
         <!-- Explorer -->
-        <section class="card pane" id="projectPanel" data-pane="explorer">
+        <section class="card pane" id="projectPanel" data-pane="explorer" data-feature="panel.explorer">
           <header class="pane-head" draggable="true" title="Drag to move this panel">
             <span class="pane-title">
               <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
@@ -292,7 +292,7 @@
              title="Drag to resize. Double-click to reset."></div>
 
         <!-- Project AI -->
-        <section class="card pane" id="chatCard" data-pane="assistant">
+        <section class="card pane" id="chatCard" data-pane="assistant" data-feature="panel.assistant">
           <header class="pane-head" draggable="true" title="Drag to move this panel">
             <span class="pane-title">
               <svg class="icon" aria-hidden="true"><use href="#i-chat"></use></svg>
@@ -370,7 +370,7 @@
              title="Drag to resize. Double-click to reset."></div>
 
         <!-- Canvas -->
-        <section class="card pane" id="outputPanel" data-pane="canvas">
+        <section class="card pane" id="outputPanel" data-pane="canvas" data-feature="panel.canvas">
           <header class="pane-head" draggable="true" title="Drag to move this panel">
             <span class="pane-title">
               <svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg>
@@ -1219,7 +1219,7 @@
     showStep(0);
   })();
 </script>
-  <script src="/static/app.js?v=16" defer></script>
+  <script src="/static/app.js?v=18" defer></script>
 </body>
 </html>
 

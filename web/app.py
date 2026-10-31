@@ -69,6 +69,43 @@ def load_stack_catalog() -> dict:
         and isinstance(entry, dict)
     }
 
+
+FEATURES_CONFIG = PROJECT_ROOT / "config" / "features.txt"
+
+
+def load_feature_flags() -> dict[str, bool]:
+    """Parse config/features.txt. Lines look like ``feature.id=1`` or ``=0``.
+
+    Unknown ids pass through so future features can be managed before the
+    backend knows about them. Missing file or missing lines simply mean
+    "on" (the frontend treats absence as enabled).
+    """
+
+    flags: dict[str, bool] = {}
+
+    try:
+        lines = FEATURES_CONFIG.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return flags
+
+    for line in lines:
+        line = line.strip()
+
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        feature_id, _, raw_value = line.partition("=")
+        feature_id = feature_id.strip()
+        raw_value = raw_value.strip().lower()
+
+        if not feature_id or raw_value not in ("0", "1", "true", "false", "on", "off"):
+            continue
+
+        flags[feature_id] = raw_value not in ("0", "false", "off")
+
+    return flags
+
+
 PROJECTS_ROOT = Path(
     os.environ.get(
         "DEVPILOT_PROJECTS_ROOT",
@@ -1513,6 +1550,12 @@ def create_app(
         result["results"] = _annotate_with_catalog(result.get("results", []))
         return result
 
+    @web_app.get("/features")
+    def list_feature_flags():
+        """UI feature flags from config/features.txt, reread per request."""
+
+        return {"features": load_feature_flags()}
+
     @web_app.get("/stacks")
     def list_known_stacks():
         """Catalog entries for the wizard's stack selection grid."""
@@ -2051,6 +2094,114 @@ def create_app(
             "path": str(target),
             "source": source,
         }
+
+    @web_app.get("/checkpoint")
+    def checkpoint_status():
+        """How many uncommitted changes exist in the DevPilot repository."""
+
+        try:
+            completed = subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                cwd=str(PROJECT_ROOT),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise HTTPException(
+                status_code=500,
+                detail="Could not read the repository status.",
+            )
+
+        changes = [
+            line for line in (completed.stdout or "").splitlines() if line.strip()
+        ]
+
+        return {"changes": len(changes)}
+
+    @web_app.post("/checkpoint")
+    def create_checkpoint(request: dict):
+        """Commit everything and move the ui-stable marker (one-click
+        equivalent of scripts/mark-ui-stable.bat)."""
+
+        message = str(request.get("message", "")).strip() or (
+            "checkpoint: before change"
+        )
+
+        try:
+            status = subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                cwd=str(PROJECT_ROOT),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not read the repository status.",
+            ) from exc
+
+        has_changes = any(
+            line.strip() for line in (status.stdout or "").splitlines()
+        )
+
+        if not has_changes:
+            return {"committed": False, "changes": 0}
+
+        try:
+            subprocess.run(
+                ["git", "add", "-A"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+                cwd=str(PROJECT_ROOT),
+            )
+
+            commit = subprocess.run(
+                ["git", "commit", "-m", message],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+                cwd=str(PROJECT_ROOT),
+            )
+
+            subprocess.run(
+                ["git", "tag", "-f", "ui-stable"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+                cwd=str(PROJECT_ROOT),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Git is not available on this computer.",
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or "").strip().splitlines()
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Checkpoint commit failed: "
+                    + (detail[-1] if detail else "git error")
+                ),
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Checkpoint commit timed out.",
+            ) from exc
+
+        summary = (commit.stdout or "").strip().splitlines()
+        first = summary[0] if summary else "committed"
+
+        return {"committed": True, "changes": 0, "summary": first}
 
     @web_app.delete("/projects/{project_id}")
     def delete_project(project_id: str):

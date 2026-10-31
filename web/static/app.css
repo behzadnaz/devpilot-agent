@@ -22,6 +22,142 @@
 
 * { box-sizing: border-box; }
 
+/* Checkpoint button (beside Agent Core) */
+#checkpointBtn {
+  color: #16a34a;
+}
+
+.checkpoint-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.checkpoint-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.checkpoint-icon .icon.node {
+  color: currentColor;
+}
+
+/* Saved: filled node with a white check */
+.checkpoint-icon[data-state="saved"] .icon.node circle {
+  fill: #16a34a;
+}
+
+.checkpoint-icon[data-state="saved"] .icon.check {
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+  color: #ffffff;
+  stroke-width: 2.2;
+}
+
+.checkpoint-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.6px solid transparent;
+  border-top-color: #16a34a;
+  animation: checkpoint-spin 0.9s linear infinite;
+}
+
+@keyframes checkpoint-spin {
+  to { transform: rotate(360deg); }
+}
+
+.checkpoint-popover {
+  position: fixed;
+  z-index: 300;
+  display: grid;
+  gap: 9px;
+  width: 264px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+}
+
+.checkpoint-popover p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.checkpoint-popover input {
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--soft);
+  color: var(--text);
+  font: 11.5px ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.checkpoint-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkpoint-commit {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #16a34a;
+  color: #ffffff;
+  font: 600 12.5px system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.checkpoint-commit:hover { filter: brightness(1.07); }
+
+.checkpoint-actions .secondary {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+.checkpoint-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.checkpoint-auto input {
+  accent-color: #16a34a;
+}
+
+.checkpoint-toast {
+  position: fixed;
+  right: 16px;
+  top: 54px;
+  z-index: 400;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12.5px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+
+.checkpoint-toast[hidden] { display: none !important; }
+
+/* Feature flags hide elements via [hidden]; enforce it over display rules. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;

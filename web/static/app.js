@@ -656,7 +656,7 @@ function initChrome() {
             DevPilot
         </span>
 
-        <div class="menu">
+        <div class="menu" data-feature="menu.file">
           <button class="ghost" id="fileMenuBtn" type="button" aria-haspopup="true" aria-expanded="false">
             ${icon("file")}File${icon("chevron")}
           </button>
@@ -668,7 +668,7 @@ function initChrome() {
 
         
 
-        <div class="menu">
+        <div class="menu" data-feature="menu.help">
           <button class="ghost" id="helpMenuBtn" type="button" aria-haspopup="true" aria-expanded="false">
             ${icon("help")}Help${icon("chevron")}
           </button>
@@ -679,8 +679,11 @@ function initChrome() {
 
         <span class="grow"></span>
 
-        <button class="ghost icon-only core-btn" id="coreBtn" type="button" aria-label="Agent Core" aria-expanded="false" title="Agent Core">${icon("bot")}<span class="badge" hidden></span></button>
-        <button class="ghost icon-only" id="themeBtn" type="button"></button>
+        <button class="ghost icon-only" id="checkpointBtn" type="button" data-feature="checkpoint" data-self-managed
+                aria-label="Save a checkpoint" aria-expanded="false" title="Save a checkpoint"
+                hidden><span class="checkpoint-icon" data-state="stable"></span></button>
+        <button class="ghost icon-only core-btn" id="coreBtn" type="button" data-feature="agent_core" aria-label="Agent Core" aria-expanded="false" title="Agent Core">${icon("bot")}<span class="badge" hidden></span></button>
+        <button class="ghost icon-only" id="themeBtn" type="button" data-feature="theme_toggle"></button>
       </div>
     </header>
 
@@ -741,6 +744,279 @@ function initChrome() {
 }
 
 initChrome();
+
+// ---------- Feature flags (config/features.txt via GET /features) ----------
+// Any id missing from the file is ON by default, so new features appear
+// without touching the file; add a line there to switch one off.
+const FEATURE_SPLITTER_NEIGHBORS = {
+  0: ["panel.explorer", "panel.assistant"],
+  1: ["panel.assistant", "panel.canvas"],
+};
+
+let featureFlags = {};
+
+function featureOn(id) {
+  return featureFlags[id] !== false;
+}
+
+function applyFeatureFlags() {
+  document.querySelectorAll("[data-feature]").forEach(el => {
+    // Some elements manage their own visibility on top of the flag
+    // (the checkpoint button also needs runtime conditions met).
+    if (el.dataset.selfManaged) return;
+    el.hidden = !featureOn(el.dataset.feature);
+  });
+
+  // A splitter between two panes is useless when either pane is off.
+  document.querySelectorAll(".splitter[data-split]").forEach(el => {
+    const neighbors = FEATURE_SPLITTER_NEIGHBORS[el.dataset.split] || [];
+    el.hidden = neighbors.length > 0 && neighbors.some(id => !featureOn(id));
+  });
+
+  // Never leave a hidden canvas tab as the active view.
+  const visibleViews = VIEWS.filter(
+    view => !view.soon && featureOn("canvas.tab." + view.id),
+  );
+  if (visibleViews.length && !featureOn("canvas.tab." + activeView)) {
+    showView(visibleViews[0].id);
+  }
+}
+
+async function loadFeatureFlags() {
+  try {
+    const response = await fetch("/features");
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.features) featureFlags = data.features;
+  } catch (error) {
+    console.warn("Feature flags unavailable; everything stays on.", error);
+  }
+  applyFeatureFlags();
+}
+
+loadFeatureFlags();
+
+// ---------- Checkpoint: suggest committing before a change ----------
+// Shown only when: the feature flag allows it, no task is running, nothing
+// waits for review, the server answers, and uncommitted changes exist.
+// "Auto" commits silently instead of opening the popover.
+const checkpointBtn = $("checkpointBtn");
+
+const CHECKPOINT_NODE =
+  '<svg class="icon node" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M2.5 12H7M17 12h4.5"/></svg>';
+const CHECKPOINT_CHECK =
+  '<svg class="icon check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9.6 12.1 1.7 1.7 3.1-3.4"/></svg>';
+const CHECKPOINT_RING = '<span class="checkpoint-ring" aria-hidden="true"></span>';
+
+let checkpointChanges = -1;   // -1 = status unknown (server unreachable)
+let checkpointAutoDone = false;
+let checkpointBusy = false;
+let checkpointSavedTimer = 0;
+
+function checkpointConditionsMet() {
+  return (
+    featureOn("checkpoint") &&
+    checkpointChanges > 0 &&
+    !running &&
+    !(typeof reviewBar !== "undefined" && reviewBar && !reviewBar.hidden)
+  );
+}
+
+function paintCheckpoint(state) {
+  const holder = checkpointBtn?.querySelector(".checkpoint-icon");
+  if (!holder) return;
+
+  holder.dataset.state = state;
+  checkpointBtn.hidden = state === "hidden";
+
+  if (state === "stable") {
+    holder.innerHTML = CHECKPOINT_NODE + CHECKPOINT_CHECK;
+    checkpointBtn.title = "Save a checkpoint before your next change";
+  } else if (state === "committing") {
+    holder.innerHTML = CHECKPOINT_NODE + CHECKPOINT_RING;
+    checkpointBtn.title = "Saving checkpoint...";
+  } else if (state === "saved") {
+    holder.innerHTML = CHECKPOINT_NODE + CHECKPOINT_CHECK;
+    checkpointBtn.title = "Checkpoint saved";
+  }
+}
+
+async function refreshCheckpoint() {
+  if (checkpointBusy) return;
+
+  try {
+    const response = await fetch("/checkpoint");
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || "unreachable");
+
+    checkpointChanges = data.changes ?? 0;
+  } catch (error) {
+    checkpointChanges = -1;
+    paintCheckpoint("hidden");
+    return;
+  }
+
+  if (checkpointChanges === 0) checkpointAutoDone = false;
+
+  if (checkpointConditionsMet()) {
+    paintCheckpoint("stable");
+
+    // Auto mode commits silently, once per dirty period.
+    if (checkpointAutoEnabled() && !checkpointAutoDone) {
+      checkpointAutoDone = true;
+      commitCheckpoint("checkpoint: before change", true);
+    }
+  } else {
+    paintCheckpoint("hidden");
+  }
+}
+
+function checkpointAutoEnabled() {
+  return recall("devpilot.checkpoint.auto") === "1";
+}
+
+async function commitCheckpoint(message, silent) {
+  if (checkpointBusy) return;
+  checkpointBusy = true;
+  paintCheckpoint("committing");
+  closeCheckpointPopover();
+
+  try {
+    const result = await postJson("/checkpoint", { message });
+
+    if (result.committed) {
+      checkpointChanges = 0;
+      paintCheckpoint("saved");
+      clearTimeout(checkpointSavedTimer);
+      checkpointSavedTimer = setTimeout(refreshCheckpoint, 3000);
+    } else {
+      checkpointChanges = 0;
+      paintCheckpoint("hidden");
+    }
+
+    if (!silent) {
+      checkpointToast(
+        result.committed
+          ? "Checkpoint saved."
+          : "Nothing to commit — everything is already saved.",
+      );
+    }
+  } catch (error) {
+    paintCheckpoint("stable");
+    checkpointToast(error.message || "Checkpoint failed.");
+  } finally {
+    checkpointBusy = false;
+  }
+}
+
+function checkpointToast(text) {
+  let toast = document.getElementById("checkpointToast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "checkpointToast";
+    toast.className = "checkpoint-toast";
+    document.body.append(toast);
+  }
+  toast.textContent = text;
+  toast.hidden = false;
+  setTimeout(() => { toast.hidden = true; }, 2600);
+}
+
+// --- popover ---
+function buildCheckpointPopover() {
+  const pop = document.createElement("div");
+  pop.id = "checkpointPopover";
+  pop.className = "checkpoint-popover";
+  pop.hidden = true;
+
+  const title = document.createElement("strong");
+  title.textContent = "Save a checkpoint?";
+
+  const body = document.createElement("p");
+  body.id = "checkpointPopoverText";
+
+  const message = document.createElement("input");
+  message.id = "checkpointMessage";
+  message.type = "text";
+  message.value = "checkpoint: before change";
+  message.setAttribute("aria-label", "Checkpoint message");
+
+  const actions = document.createElement("div");
+  actions.className = "checkpoint-actions";
+
+  const commit = document.createElement("button");
+  commit.type = "button";
+  commit.className = "checkpoint-commit";
+  commit.textContent = "Commit";
+
+  const notNow = document.createElement("button");
+  notNow.type = "button";
+  notNow.className = "secondary";
+  notNow.textContent = "Not now";
+
+  const autoRow = document.createElement("label");
+  autoRow.className = "checkpoint-auto";
+  const auto = document.createElement("input");
+  auto.type = "checkbox";
+  auto.id = "checkpointAutoToggle";
+  auto.checked = checkpointAutoEnabled();
+  const autoText = document.createElement("span");
+  autoText.textContent = "Auto";
+  autoRow.append(auto, autoText);
+
+  actions.append(commit, notNow, autoRow);
+  pop.append(title, body, message, actions);
+  document.body.append(pop);
+
+  commit.addEventListener("click", () =>
+    commitCheckpoint(message.value.trim() || "checkpoint: before change", false),
+  );
+  notNow.addEventListener("click", closeCheckpointPopover);
+  auto.addEventListener("change", () => {
+    remember("devpilot.checkpoint.auto", auto.checked ? "1" : "0");
+    if (auto.checked) closeCheckpointPopover();
+  });
+  document.addEventListener("click", event => {
+    if (!pop.hidden && !pop.contains(event.target) && event.target !== checkpointBtn &&
+        !checkpointBtn.contains(event.target)) {
+      closeCheckpointPopover();
+    }
+  });
+
+  return pop;
+}
+
+function openCheckpointPopover() {
+  const pop = $("checkpointPopover") || buildCheckpointPopover();
+  const text = $("checkpointPopoverText");
+  const n = checkpointChanges;
+  text.textContent =
+    n === 1
+      ? "Project is stable. 1 change is not committed yet."
+      : `Project is stable. ${n} changes are not committed yet.`;
+
+  const rect = checkpointBtn.getBoundingClientRect();
+  pop.hidden = false;
+  pop.style.top = rect.bottom + 8 + "px";
+  pop.style.left = Math.max(8, rect.right - pop.offsetWidth) + "px";
+  checkpointBtn.setAttribute("aria-expanded", "true");
+}
+
+function closeCheckpointPopover() {
+  const pop = document.getElementById("checkpointPopover");
+  if (pop) pop.hidden = true;
+  checkpointBtn?.setAttribute("aria-expanded", "false");
+}
+
+if (checkpointBtn) {
+  checkpointBtn.addEventListener("click", () => {
+    const pop = document.getElementById("checkpointPopover");
+    if (pop && !pop.hidden) closeCheckpointPopover();
+    else openCheckpointPopover();
+  });
+
+  setInterval(refreshCheckpoint, 8000);
+  refreshCheckpoint();
+}
 
 // ---------- Workspace ----------
 const projectList = $("projectList");
@@ -816,6 +1092,7 @@ function buildTabs() {
     button.type = "button";
     button.className = "seg-btn";
     button.dataset.view = view.id;
+    button.dataset.feature = "canvas.tab." + view.id;
     button.title = view.label + (view.soon ? " (soon)" : "");
     button.setAttribute("aria-label", view.label);
     button.disabled = !!view.soon;
