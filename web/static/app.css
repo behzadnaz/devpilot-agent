@@ -125,6 +125,18 @@
   font-size: 12.5px;
 }
 
+.checkpoint-restore {
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--bad);
+  font: 600 12.5px system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.checkpoint-restore:hover { filter: brightness(1.15); }
+
 .checkpoint-auto {
   display: inline-flex;
   align-items: center;

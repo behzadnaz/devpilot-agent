@@ -2095,79 +2095,103 @@ def create_app(
             "source": source,
         }
 
+    # -----------------------------------------------------
+    # Per-project checkpoints (selected project in Explorer)
+    # -----------------------------------------------------
+
+    def _project_repo_ready(project_path: Path) -> bool:
+        return (project_path / ".git").exists()
+
+    def _project_change_count(project_path: Path) -> int:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            cwd=str(project_path),
+        )
+        return sum(
+            1 for line in (completed.stdout or "").splitlines() if line.strip()
+        )
+
     @web_app.get("/checkpoint")
-    def checkpoint_status():
-        """How many uncommitted changes exist in the DevPilot repository."""
+    def checkpoint_status(project_id: str = ""):
+        """Uncommitted-change count for the selected Explorer project.
 
-        try:
-            completed = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-                cwd=str(PROJECT_ROOT),
-            )
-        except (OSError, subprocess.TimeoutExpired):
+        Projects without a git repository yet report one pending change so
+        the UI offers the initial checkpoint.
+        """
+
+        if not project_id.strip():
             raise HTTPException(
-                status_code=500,
-                detail="Could not read the repository status.",
+                status_code=400,
+                detail="Select a project first.",
             )
 
-        changes = [
-            line for line in (completed.stdout or "").splitlines() if line.strip()
-        ]
+        project_path = _safe_project_path(project_registry, project_id)
 
-        return {"changes": len(changes)}
+        if not _project_repo_ready(project_path):
+            return {"repo_ready": False, "changes": 1}
+
+        return {
+            "repo_ready": True,
+            "changes": _project_change_count(project_path),
+        }
 
     @web_app.post("/checkpoint")
     def create_checkpoint(request: dict):
-        """Commit everything and move the ui-stable marker (one-click
-        equivalent of scripts/mark-ui-stable.bat)."""
+        """Commit the selected project and move its ui-stable marker.
 
-        message = str(request.get("message", "")).strip() or (
-            "checkpoint: before change"
-        )
+        Initializes a git repository in the project folder on first use.
+        """
 
-        try:
-            status = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-                cwd=str(PROJECT_ROOT),
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        project_id = str(request.get("project_id", "")).strip()
+        if not project_id:
             raise HTTPException(
-                status_code=500,
-                detail="Could not read the repository status.",
-            ) from exc
+                status_code=400,
+                detail="Select a project first.",
+            )
 
-        has_changes = any(
-            line.strip() for line in (status.stdout or "").splitlines()
-        )
+        project_path = _safe_project_path(project_registry, project_id)
 
-        if not has_changes:
-            return {"committed": False, "changes": 0}
+        if not _project_repo_ready(project_path):
+            message = "Initial checkpoint"
+        else:
+            message = str(request.get("message", "")).strip() or (
+                "checkpoint: before change"
+            )
+
+            if _project_change_count(project_path) == 0:
+                return {"committed": False, "changes": 0}
 
         try:
+            if not _project_repo_ready(project_path):
+                subprocess.run(
+                    ["git", "init", "-q"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=True,
+                    cwd=str(project_path),
+                )
+
             subprocess.run(
                 ["git", "add", "-A"],
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=True,
-                cwd=str(PROJECT_ROOT),
+                cwd=str(project_path),
             )
 
-            commit = subprocess.run(
+            subprocess.run(
                 ["git", "commit", "-m", message],
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=True,
-                cwd=str(PROJECT_ROOT),
+                cwd=str(project_path),
             )
 
             subprocess.run(
@@ -2176,32 +2200,88 @@ def create_app(
                 text=True,
                 timeout=10,
                 check=True,
-                cwd=str(PROJECT_ROOT),
+                cwd=str(project_path),
             )
         except FileNotFoundError as exc:
             raise HTTPException(
                 status_code=500,
-                detail="Git is not available on this computer.",
+                detail="Git is not installed on this computer.",
             ) from exc
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or "").strip().splitlines()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not run Git in the project folder.",
+            ) from exc
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            detail = (getattr(exc, "stderr", "") or "").strip().splitlines()
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    "Checkpoint commit failed: "
+                    "Checkpoint failed: "
                     + (detail[-1] if detail else "git error")
                 ),
             ) from exc
-        except subprocess.TimeoutExpired as exc:
+
+        return {
+            "committed": True,
+            "changes": 0,
+            "summary": message,
+        }
+
+    @web_app.post("/checkpoint/restore")
+    def restore_checkpoint(request: dict):
+        """Restore the selected project's files from its last checkpoint."""
+
+        project_id = str(request.get("project_id", "")).strip()
+        if not project_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Select a project first.",
+            )
+
+        project_path = _safe_project_path(project_registry, project_id)
+
+        if not _project_repo_ready(project_path):
+            raise HTTPException(
+                status_code=400,
+                detail="The project has no checkpoint yet.",
+            )
+
+        has_tag = subprocess.run(
+            ["git", "rev-parse", "ui-stable"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            cwd=str(project_path),
+        )
+
+        if has_tag.returncode != 0:
+            raise HTTPException(
+                status_code=400,
+                detail="The project has no checkpoint to restore yet.",
+            )
+
+        try:
+            subprocess.run(
+                ["git", "checkout", "ui-stable", "--", "."],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+                cwd=str(project_path),
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            detail = (getattr(exc, "stderr", "") or "").strip().splitlines()
             raise HTTPException(
                 status_code=500,
-                detail="Checkpoint commit timed out.",
+                detail=(
+                    "Restore failed: "
+                    + (detail[-1] if detail else "git error")
+                ),
             ) from exc
 
-        summary = (commit.stdout or "").strip().splitlines()
-        first = summary[0] if summary else "committed"
-
-        return {"committed": True, "changes": 0, "summary": first}
+        return {"restored": True}
 
     @web_app.delete("/projects/{project_id}")
     def delete_project(project_id: str):

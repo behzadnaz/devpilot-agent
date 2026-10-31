@@ -815,6 +815,7 @@ let checkpointSavedTimer = 0;
 function checkpointConditionsMet() {
   return (
     featureOn("checkpoint") &&
+    selectedProjectId &&
     checkpointChanges > 0 &&
     !running &&
     !(typeof reviewBar !== "undefined" && reviewBar && !reviewBar.hidden)
@@ -843,8 +844,16 @@ function paintCheckpoint(state) {
 async function refreshCheckpoint() {
   if (checkpointBusy) return;
 
+  if (!selectedProjectId) {
+    checkpointChanges = -1;
+    paintCheckpoint("hidden");
+    return;
+  }
+
   try {
-    const response = await fetch("/checkpoint");
+    const response = await fetch(
+      "/checkpoint?project_id=" + encodeURIComponent(selectedProjectId),
+    );
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || "unreachable");
 
@@ -881,7 +890,10 @@ async function commitCheckpoint(message, silent) {
   closeCheckpointPopover();
 
   try {
-    const result = await postJson("/checkpoint", { message });
+    const result = await postJson("/checkpoint", {
+      project_id: selectedProjectId,
+      message,
+    });
 
     if (result.committed) {
       checkpointChanges = 0;
@@ -905,6 +917,32 @@ async function commitCheckpoint(message, silent) {
     checkpointToast(error.message || "Checkpoint failed.");
   } finally {
     checkpointBusy = false;
+  }
+}
+
+async function restoreCheckpoint() {
+  if (!selectedProjectId) return;
+
+  const confirmed = confirm(
+    `Discard the current changes in "${selectedProjectId}" and restore ` +
+    "the files from its last checkpoint?",
+  );
+  if (!confirmed) return;
+
+  closeCheckpointPopover();
+  paintCheckpoint("committing");
+
+  try {
+    await postJson("/checkpoint/restore", {
+      project_id: selectedProjectId,
+    });
+
+    checkpointToast(`Project "${selectedProjectId}" restored to its last checkpoint.`);
+    await loadTree();
+  } catch (error) {
+    checkpointToast(error.message || "Restore failed.");
+  } finally {
+    await refreshCheckpoint();
   }
 }
 
@@ -940,6 +978,11 @@ function buildCheckpointPopover() {
   message.value = "checkpoint: before change";
   message.setAttribute("aria-label", "Checkpoint message");
 
+  const restore = document.createElement("button");
+  restore.type = "button";
+  restore.className = "checkpoint-restore";
+  restore.textContent = "Restore";
+
   const actions = document.createElement("div");
   actions.className = "checkpoint-actions";
 
@@ -963,7 +1006,7 @@ function buildCheckpointPopover() {
   autoText.textContent = "Auto";
   autoRow.append(auto, autoText);
 
-  actions.append(commit, notNow, autoRow);
+  actions.append(commit, notNow, restore, autoRow);
   pop.append(title, body, message, actions);
   document.body.append(pop);
 
@@ -971,6 +1014,7 @@ function buildCheckpointPopover() {
     commitCheckpoint(message.value.trim() || "checkpoint: before change", false),
   );
   notNow.addEventListener("click", closeCheckpointPopover);
+  restore.addEventListener("click", () => restoreCheckpoint());
   auto.addEventListener("change", () => {
     remember("devpilot.checkpoint.auto", auto.checked ? "1" : "0");
     if (auto.checked) closeCheckpointPopover();
@@ -989,10 +1033,13 @@ function openCheckpointPopover() {
   const pop = $("checkpointPopover") || buildCheckpointPopover();
   const text = $("checkpointPopoverText");
   const n = checkpointChanges;
+  const label = selectedProjectId || "the project";
   text.textContent =
     n === 1
-      ? "Project is stable. 1 change is not committed yet."
-      : `Project is stable. ${n} changes are not committed yet.`;
+      ? `"${label}" is stable. 1 change is not committed yet.`
+      : n > 1
+        ? `"${label}" is stable. ${n} changes are not committed yet.`
+        : `"${label}" is stable. Changes are not committed yet.`;
 
   const rect = checkpointBtn.getBoundingClientRect();
   pop.hidden = false;
@@ -1556,6 +1603,9 @@ function setChatEnabled() {
 
 async function selectProject(id) {
   if (id === selectedProjectId && running) return;
+  // The checkpoint icon tracks the selected project; re-check immediately
+  // instead of waiting for the next polling cycle.
+  if (typeof refreshCheckpoint === "function") refreshCheckpoint();
   if (running && id !== selectedProjectId) {
     if (!confirm('A task is still running in "' + selectedProjectId + '". Stop it and switch to "' + id + '"?')) return;
     try { await postJson("/tasks/stop", { project_id: selectedProjectId }); } catch (e) {}

@@ -2834,125 +2834,158 @@ class _AppTest:
         # The proposed commands come from the stack catalog, not the client.
         assert results[0]["install_command"].startswith("winget install")
 
-    def _init_checkpoint_repo(self, tmp_path):
-        import subprocess as subprocess_module
-        import web.app as app_module
+    def _checkpoint_project(self, tmp_path, registered=True):
+        """A registered project folder the checkpoint tests operate on."""
 
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        for args in (
-            ["git", "init", "-q"],
-            ["git", "config", "user.email", "test@local"],
-            ["git", "config", "user.name", "Test"],
-        ):
-            subprocess_module.run(args, cwd=str(repo), check=True, capture_output=True)
-        (repo / "seed.txt").write_text("seed", encoding="utf-8")
-        subprocess_module.run(
-            ["git", "add", "-A"], cwd=str(repo), check=True, capture_output=True
+        folder = tmp_path / "CheckProj"
+        folder.mkdir()
+        (folder / "main.py").write_text("print('v1')", encoding="utf-8")
+
+        if not registered:
+            return folder, _ProjectRegistryStub()
+
+        return folder, _ProjectRegistryStub(
+            projects={
+                "check-proj": {
+                    "workflow": "software_development",
+                    "path": folder,
+                }
+            }
         )
-        subprocess_module.run(
-            ["git", "commit", "-q", "-m", "seed"],
-            cwd=str(repo),
-            check=True,
-            capture_output=True,
-        )
-        monkeypatch_target = app_module.PROJECT_ROOT
-        return repo, app_module, monkeypatch_target
 
-    def test_checkpoint_status_counts_uncommitted_changes(self, tmp_path, monkeypatch):
-        repo, app_module, _ = self._init_checkpoint_repo(tmp_path)
-        monkeypatch.setattr(app_module, "PROJECT_ROOT", repo)
-
-        client = TestClient(
+    def _checkpoint_client(self, registry, tmp_path):
+        return TestClient(
             create_app(
                 agent=None,
-                project_registry=_ProjectRegistryStub(),
+                project_registry=registry,
                 projects_root=tmp_path,
             )
         )
 
-        assert client.get("/checkpoint").json() == {"changes": 0}
+    def test_checkpoint_reports_pending_initial_for_project_without_git(self, tmp_path):
+        folder, registry = self._checkpoint_project(tmp_path)
+        client = self._checkpoint_client(registry, tmp_path)
 
-        (repo / "new.txt").write_text("dirty", encoding="utf-8")
+        response = client.get("/checkpoint", params={"project_id": "check-proj"})
 
-        assert client.get("/checkpoint").json() == {"changes": 1}
+        assert response.status_code == 200, response.text
+        assert response.json() == {"repo_ready": False, "changes": 1}
 
-    def test_checkpoint_post_commits_and_moves_ui_stable_tag(self, tmp_path, monkeypatch):
+    def test_checkpoint_requires_a_project_id(self, tmp_path):
+        client = self._checkpoint_client(_ProjectRegistryStub(), tmp_path)
+
+        response = client.get("/checkpoint")
+
+        assert response.status_code == 400, response.text
+
+    def test_checkpoint_initializes_repo_and_creates_first_checkpoint(self, tmp_path):
         import subprocess as subprocess_module
 
-        repo, app_module, _ = self._init_checkpoint_repo(tmp_path)
-        monkeypatch.setattr(app_module, "PROJECT_ROOT", repo)
-
-        client = TestClient(
-            create_app(
-                agent=None,
-                project_registry=_ProjectRegistryStub(),
-                projects_root=tmp_path,
-            )
-        )
-
-        (repo / "feature.txt").write_text("work", encoding="utf-8")
+        folder, registry = self._checkpoint_project(tmp_path)
+        client = self._checkpoint_client(registry, tmp_path)
 
         response = client.post(
             "/checkpoint",
-            json={"message": "checkpoint: before change"},
+            json={"project_id": "check-proj"},
         )
 
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["committed"] is True
+        assert body["summary"] == "Initial checkpoint"
 
-        # The change is committed and the ui-stable tag points at it.
-        status = subprocess_module.run(
-            ["git", "status", "--porcelain"],
-            cwd=str(repo),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        assert status.strip() == ""
-
-        tag_commit = subprocess_module.run(
-            ["git", "rev-list", "-1", "ui-stable"],
-            cwd=str(repo),
-            capture_output=True,
-            text=True,
-            check=True,
+        # The project folder is now a git repository with the marker tag.
+        assert (folder / ".git").is_dir()
+        tag = subprocess_module.run(
+            ["git", "rev-parse", "ui-stable"],
+            cwd=str(folder), capture_output=True, text=True, check=True,
         ).stdout.strip()
-        head_commit = subprocess_module.run(
+        head = subprocess_module.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=str(repo),
-            capture_output=True,
-            text=True,
-            check=True,
+            cwd=str(folder), capture_output=True, text=True, check=True,
         ).stdout.strip()
-        assert tag_commit == head_commit
+        assert tag == head
+
+        assert client.get(
+            "/checkpoint", params={"project_id": "check-proj"}
+        ).json() == {"repo_ready": True, "changes": 0}
+
+    def test_checkpoint_commits_project_changes_with_message(self, tmp_path):
+        import subprocess as subprocess_module
+
+        folder, registry = self._checkpoint_project(tmp_path)
+        client = self._checkpoint_client(registry, tmp_path)
+
+        client.post("/checkpoint", json={"project_id": "check-proj"})
+        (folder / "main.py").write_text("print('v2')", encoding="utf-8")
+
+        assert client.get(
+            "/checkpoint", params={"project_id": "check-proj"}
+        ).json() == {"repo_ready": True, "changes": 1}
+
+        response = client.post(
+            "/checkpoint",
+            json={
+                "project_id": "check-proj",
+                "message": "checkpoint: before change",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["committed"] is True
 
         log = subprocess_module.run(
             ["git", "log", "-1", "--pretty=%s"],
-            cwd=str(repo),
-            capture_output=True,
-            text=True,
-            check=True,
+            cwd=str(folder), capture_output=True, text=True, check=True,
         ).stdout.strip()
         assert log == "checkpoint: before change"
 
-    def test_checkpoint_post_with_clean_tree_reports_nothing_to_commit(self, tmp_path, monkeypatch):
-        repo, app_module, _ = self._init_checkpoint_repo(tmp_path)
-        monkeypatch.setattr(app_module, "PROJECT_ROOT", repo)
+    def test_checkpoint_with_clean_project_reports_nothing_to_commit(self, tmp_path):
+        folder, registry = self._checkpoint_project(tmp_path)
+        client = self._checkpoint_client(registry, tmp_path)
 
-        client = TestClient(
-            create_app(
-                agent=None,
-                project_registry=_ProjectRegistryStub(),
-                projects_root=tmp_path,
-            )
+        client.post("/checkpoint", json={"project_id": "check-proj"})
+
+        response = client.post(
+            "/checkpoint",
+            json={"project_id": "check-proj", "message": "again"},
         )
-
-        response = client.post("/checkpoint", json={})
 
         assert response.status_code == 200, response.text
         assert response.json() == {"committed": False, "changes": 0}
+
+    def test_restore_returns_project_files_to_last_checkpoint(self, tmp_path):
+        folder, registry = self._checkpoint_project(tmp_path)
+        client = self._checkpoint_client(registry, tmp_path)
+
+        client.post("/checkpoint", json={"project_id": "check-proj"})
+
+        # A change lands after the checkpoint...
+        (folder / "main.py").write_text("print('broken')", encoding="utf-8")
+        (folder / "extra.py").write_text("new file", encoding="utf-8")
+
+        response = client.post(
+            "/checkpoint/restore",
+            json={"project_id": "check-proj"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"restored": True}
+
+        # ...and restore brings the checkpointed content back.
+        assert (folder / "main.py").read_text(encoding="utf-8") == "print('v1')"
+
+    def test_restore_without_checkpoint_is_rejected(self, tmp_path):
+        folder, registry = self._checkpoint_project(tmp_path)
+        client = self._checkpoint_client(registry, tmp_path)
+
+        response = client.post(
+            "/checkpoint/restore",
+            json={"project_id": "check-proj"},
+        )
+
+        assert response.status_code == 400, response.text
+        assert "no checkpoint" in response.json()["detail"]
 
     def test_features_endpoint_parses_config_file(self, tmp_path, monkeypatch):
         import web.app as app_module
